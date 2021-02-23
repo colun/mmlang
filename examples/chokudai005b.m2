@@ -83,5 +83,3 @@ Q[field[center]].push_back(center)
 search2(0, 0, 0, 0, field[center])
 print(best.size()-1)
 print(center/100+1, center%100+1, best[1:]+1)
-
-
