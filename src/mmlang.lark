@@ -1,0 +1,112 @@
+start: stmt*
+?stmt: multi_stmt | if_stmt | while_stmt | for_stmt | funcdef
+?multi_stmt: single_stmt (";" single_stmt)* [";"] _NEWLINE
+?single_stmt: assign | pass_stmt | break_stmt | continue_stmt | return_stmt | assert_stmt
+
+pass_stmt: "pass"
+break_stmt: "break"
+continue_stmt: "continue"
+return_stmt: "return" [assign]
+assert_stmt: "assert" test ["," test]
+
+if_stmt: "if" test ":" suite ("elif" test ":" suite)* ["else" ":" suite]
+while_stmt: "while" test ":" suite ["else" ":" suite]
+for_stmt: "for" [noinstant_tuple "in"] noinstant_tuple ":" suite ["else" ":" suite]
+suite: multi_stmt | _NEWLINE _INDENT stmt+ _DEDENT
+
+funcdef: decorator* "def" var "(" parameters? ")" ["->" test] ":" suite
+decorator: "@" var [ "(" [arguments] ")" ] _NEWLINE
+parameters: paramvalue ("," paramvalue)*
+?paramvalue: typedparam ["=" test]
+typedparam: var [":" test]
+?arguments: argvalue ("," argvalue)*
+?argvalue: test ["=" test]
+
+?assign: tuple (assign_op tuple)* [mod]
+!assign_op: "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" | "**=" | "//=" | "<?=" | ">?="
+mod: "mod" test
+
+?tuple: instant ("," instant)* [","]
+?noinstant_tuple: bit_or ("," bit_or)* [","]
+instant: test (instant_op [test])* | (instant_op [test])+
+!instant_op: "@"|":"
+?test: logical_or ["?" logical_or ":" test]
+?logical_or: logical_and ("or" logical_and)*
+?logical_and: logical_not_wrap ("and" logical_not_wrap)*
+?logical_not_wrap: logical_not | comparison
+logical_not: ("!"|"not") logical_not_wrap
+?comparison: bit_or (comp_op bit_or)*
+!comp_op: "<"|">"|"=="|">="|"<="|"!="|"in"|"not" "in"
+
+?bit_or: bit_xor ("|" bit_xor)*
+?bit_xor: bit_and ("^" bit_and)*
+?bit_and: shift ("&" shift)*
+?shift: arith (shift_op arith)*
+!shift_op: "<<"|">>"
+
+?arith: mul (arith_op mul)*
+!arith_op: "+"|"-"
+?mul: prefix (mul_op prefix)*
+!mul_op: "*"|"/"|"%"
+?prefix: pre_inc
+       | pre_dec
+       | pre_plus
+       | pre_minus
+       | bit_not
+       | power
+
+pre_inc: "++" prefix
+pre_dec: "--" prefix
+pre_plus: "+" prefix
+pre_minus: "-" prefix
+bit_not: "~" prefix
+
+?power: suffix ("**" prefix)*
+?suffix: funccall
+       | getitem
+       | template
+       | getattr
+       | post_inc
+       | post_dec
+       | atom
+
+funccall: suffix "(" [tuple] ")"
+getitem: suffix "[" assign "]"
+template: suffix "!" "(" [tuple] ")"
+getattr: suffix "." var
+post_inc: suffix "++"
+post_dec: suffix "--"
+
+?atom: "(" assign ")" -> parenthesis
+    | "[" tuple "]"  -> list
+    | "True" -> const_true
+    | "False" -> const_false
+    | number
+    | string
+    | char
+    | var
+    | ref
+
+var: /[a-zA-Z_]\w*/
+
+ref: /\$\d+/
+
+?number: dec_number | float | image_float | image_number
+string: (STRING)+
+char: (CHAR)+
+
+STRING: /(".*?(?<!\\)(\\\\)*?")/i
+CHAR: /('.*?(?<!\\)(\\\\)*?')/i
+
+dec_number: /0(|x[\da-f]*|o[0-7]*|b[0-1]*)(ll)?|[1-9]\d*(ll)?/i
+float: /((\d+\.\d*|\.\d+)(e[-+]?\d+)?|\d+(e[-+]?\d+))(ll)?/i
+image_float: float "j"i
+image_number: dec_number "j"i
+
+_NEWLINE: ( /\r?\n[\t ]*/ | COMMENT )+
+
+COMMENT: /#[^\n]*/
+%ignore /[\t \f]+/  // WS
+%ignore /\\[\t \f]*\r?\n/   // LINE_CONT
+%ignore COMMENT
+%declare _INDENT _DEDENT
