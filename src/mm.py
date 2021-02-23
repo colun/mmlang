@@ -115,6 +115,7 @@ def main():
                 if os.path.exists('result.gv'):
                     gvc_path = os.path.join(WORK_DIR, 'gvc', 'gvc.jar')
                     if not os.path.exists(gvc_path):
+                        os.makedirs(os.path.dirname(gvc_path), exist_ok=True)
                         open(gvc_path, 'wb').write(urllib.request.urlopen('https://github.com/colun/gvc/raw/master/gvc.jar').read())
                     subprocess.run(['java', '-jar', gvc_path, 'result.gv'])
         if stdout_flag:
