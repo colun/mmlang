@@ -39,7 +39,7 @@ for f in range(1, N):
 
 using namespace std;
 
-// library code:
+// library code :
 
 typedef long long int64;typedef __int128 int128;const char*inputCLineOrWord(int mode){static char buf[2097152];static int bufLen=sizeof(buf);static int bufPos=sizeof(buf);static bool canReadFlag=true;static bool crFlag=false;static bool enterFlag=false;
 if(canReadFlag&&(enterFlag?bufLen<=bufPos:(int)sizeof(buf)<=bufPos+bufPos)){if(0<bufLen-bufPos){memmove(buf,buf+bufPos,bufLen-bufPos);bufLen-=bufPos;}else{bufLen=0;}char*result=fgets(buf+bufLen,sizeof(buf)-bufLen,stdin);canReadFlag=(result!=NULL);if(result!=NULL)
@@ -70,7 +70,7 @@ e(e),s(s){}_range_ite begin(){return _range_ite(b,s);}_range_ite end(){return _r
 {assert(s!=0);if(0<s){e=b+(std::max(0,e-b-1)/ s+1)*s;}else{e=b+(std::max(0,b-e-1)/-s+1)*s;}return _range_t(b,e,s);}_range_t rrange(int i){return _range_t(std::max(0,i)-1,-1,-1);}_range_t rrange(int b,int e){return _range_t(std::max(b,e)-1,b-1,-1);}_range_t
 rrange(int b,int e,int s){assert(s!=0);if(0<s){e=b+(std::max(0,e-b-1)/ s+1)*s;}else{e=b+(std::max(0,b-e-1)/-s+1)*s;}return _range_t(e-s,b-s,-s);}
 
-// generated code (by mmlang ... https://github.com/colun/mmlang ) :
+// generated code ( by mmlang ... https://github.com/colun/mmlang ) :
 
 int N;
 int M;

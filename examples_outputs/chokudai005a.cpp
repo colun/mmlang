@@ -71,7 +71,7 @@ print(center/100+1, center%100+1, best[1:]+1)
 
 using namespace std;
 
-// library code:
+// library code :
 
 typedef long long int64;typedef __int128 int128;const char*inputCLineOrWord(int mode){static char buf[2097152];static int bufLen=sizeof(buf);static int bufPos=sizeof(buf);static bool canReadFlag=true;static bool crFlag=false;static bool enterFlag=false;
 if(canReadFlag&&(enterFlag?bufLen<=bufPos:(int)sizeof(buf)<=bufPos+bufPos)){if(0<bufLen-bufPos){memmove(buf,buf+bufPos,bufLen-bufPos);bufLen-=bufPos;}else{bufLen=0;}char*result=fgets(buf+bufLen,sizeof(buf)-bufLen,stdin);canReadFlag=(result!=NULL);if(result!=NULL)
@@ -193,7 +193,7 @@ int mask=N-1;fast_array<unsigned short,N> memo;public:inline void clear(){memset
 }return memo[key]==hi;}inline void set(long long hash){int key=hash&mask;unsigned short hi=hash >> 16;if(hi==0){hi=1;}memo[key]=hi;}inline void reset(long long hash){int key=hash&mask;memo[key]=0;}inline bool testWithSet(long long hash){int key=hash&
 mask;unsigned short hi=hash >> 16;if(hi==0){hi=1;}if(memo[key]==hi){return true;}memo[key]=hi;return false;}};
 
-// generated code (by mmlang ... https://github.com/colun/mmlang ) :
+// generated code ( by mmlang ... https://github.com/colun/mmlang ) :
 
 void search2(int hash, int hash0, int score, int score0, int color);
 
