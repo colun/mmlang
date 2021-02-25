@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-python3 `pwd`/src/mm.py $@
+python3 `dirname $0`/src/mm.py $@
