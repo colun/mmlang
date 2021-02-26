@@ -46,7 +46,9 @@ def compile_raw(target_path):
         sys.excepthook(*(sys.exc_info()))
 
 def compile_file(origin_outs, target_path, output_path):
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    dir_path = os.path.dirname(output_path)
+    if dir_path:
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, 'w') as f:
         sys.stdout, sys.stderr = f, f
         compile_raw(target_path)
