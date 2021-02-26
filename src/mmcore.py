@@ -365,7 +365,7 @@ class Context:
                 return
             ty0 = dObj[0].getType() if isinstance(dObj[0], base_node) else dObj[0]
             ty1 = ty.getType() if isinstance(ty, base_node) else ty
-            if op == '=' and dObj[0] is None:
+            if op == '=' and ty0 is None:
                 dObj[0] = ty
             else:
                 dObj[0] = hintType(name, ty0, ty1, op)
@@ -403,7 +403,12 @@ class Context:
             return self.temporaryDefinitions[name][-1]
         if name in self.definitions:
             ty = self.definitions[name][0]
-            return ty.getType() if isinstance(ty, base_node) else ty
+            if not isinstance(ty, base_node):
+                return ty
+            self.definitions[name][0] = None
+            ret = ty.getType()
+            self.definitions[name][0] = ty
+            return ret
         if self.parent is not None:
             return self.parent.getType(name)
         return 'int'
