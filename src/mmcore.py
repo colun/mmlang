@@ -16,6 +16,8 @@ def restruct(obj, new_class, *args, **kargs):
 
 
 def typeToStr(ty):
+    if ty is None:
+        return 'int'
     if isinstance(ty, tuple):
         return ('tuple<%s>' % (', '.join([typeToStr(t) for t in ty]), )).replace('>>', '> >')
     return str(ty)
@@ -792,11 +794,16 @@ class group_node(base_node):
                         itemTy = 'auto'
                     temporaries = []
                     if isinstance(temporary, tuple_node) and temporary.node_type == 'tuple':
-                        assert isinstance(itemTy, tuple)
-                        assert len(temporary.elements) == len(itemTy)
-                        for element, iTy in zip(child.temporary.elements, itemTy):
-                            assert isinstance(element, node_var)
-                            temporaries.append((element.name, iTy))
+                        if itemTy=='auto':
+                            for element in child.temporary.elements:
+                                assert isinstance(element, node_var)
+                                temporaries.append((element.name, 'auto'))
+                        else:
+                            assert isinstance(itemTy, tuple)
+                            assert len(temporary.elements) == len(itemTy)
+                            for element, iTy in zip(child.temporary.elements, itemTy):
+                                assert isinstance(element, node_var)
+                                temporaries.append((element.name, iTy))
                         temporary = '$fr'
                     else:
                         assert isinstance(temporary, node_var)
@@ -813,7 +820,7 @@ class group_node(base_node):
                         context.print0('while(!(%s).empty()) { %s %s = (%s).%s(); (%s).pop();' % (
                             child.container,
                             typeToStr(itemTy),
-                            child.temporary,
+                            temporary,
                             child.container,
                             D[ty.name],
                             child.container,
