@@ -1750,9 +1750,9 @@ class op2_node(base_node):
         if self.node_type == 'comparison' and len(self.args) == 3 and self.args[1] in ['in', 'not in']:
             ty = self.args[2].getType()
             if isinstance(ty, Template) and ty.name in ['set', 'multiset']:
-                return '%s.find(%s)!=%s.end()' % (self.args[2], self.args[0], self.args[2])
+                return '%s.find(%s)%s%s.end()' % (self.args[2], self.args[0], '==' if self.args[1]=='not in' else '!=', self.args[2])
             if isinstance(ty, Template) and ty.name in ['vector']:
-                return 'find(%s.begin(), %s.end(), %s)!=%s.end()' % (self.args[2], self.args[2], self.args[0], self.args[2])
+                return 'find(%s.begin(), %s.end(), %s)%s%s.end()' % (self.args[2], self.args[2], self.args[0], '==' if self.args[1]=='not in' else '!=', self.args[2])
         ty = self.args[0].getType()
         if self.node_type == 'assign' and isinstance(ty, Template) and ty.name in ['set', 'multiset'] and self.args[1] in ['+=', '-=']:
             assert len(self.args) == 3
