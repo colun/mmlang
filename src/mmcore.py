@@ -454,6 +454,14 @@ class Context:
 context = None
 
 
+def expand_minus(x):
+    minus_flag = False
+    while isinstance(x, pre_op1_node) and x.node_type == 'pre_minus':
+        minus_flag = not minus_flag
+        x = x.child_node
+    return x, minus_flag
+
+
 def compress(src):
     ret = []
     prefix = ''
@@ -786,30 +794,40 @@ class group_node(base_node):
                 ty = expr.getType()
                 temporary = child.temporary
                 if ty in ['long long', 'int64', 'int', 'short', 'char', 'bool']:
-                    context.print(
-                        'for(int %s=0; %s<%s; ++%s) {' % (temporary, temporary, expr, temporary))
+                    temporary, minus_flag = expand_minus(temporary)
+                    assert isinstance(temporary, node_var)
+                    if not minus_flag:
+                        context.print('for(int %s=0; %s<%s; ++%s) {' % (temporary, temporary, expr, temporary))
+                    else:
+                        context.print('for(int %s=0; -%s<%s; --%s) {' % (temporary, temporary, expr, temporary))
                 else:
                     itemTy = itemType(ty)
                     if itemTy is None:
                         itemTy = 'auto'
                     temporaries = []
-                    if isinstance(temporary, tuple_node) and temporary.node_type == 'tuple':
+                    temporary_is_tuple = isinstance(temporary, tuple_node) and temporary.node_type == 'tuple'
+                    if temporary_is_tuple:
                         if itemTy=='auto':
                             for element in child.temporary.elements:
+                                element, minus_flag = expand_minus(element)
                                 assert isinstance(element, node_var)
-                                temporaries.append((element.name, 'auto'))
+                                temporaries.append((element.name, 'auto', minus_flag))
                         else:
                             assert isinstance(itemTy, tuple)
                             assert len(temporary.elements) == len(itemTy)
                             for element, iTy in zip(child.temporary.elements, itemTy):
+                                element, minus_flag = expand_minus(element)
                                 assert isinstance(element, node_var)
-                                temporaries.append((element.name, iTy))
+                                temporaries.append((element.name, iTy, minus_flag))
                         temporary = '$fr'
                     else:
+                        temporary, minus_flag = expand_minus(temporary)
                         assert isinstance(temporary, node_var)
                         temporary = child.temporary.name
-                        temporaries.append((temporary, itemTy))
-                    for name, iTy in temporaries:
+                        temporaries.append((temporary, itemTy, minus_flag))
+                        if minus_flag:
+                            temporary = '$fr'
+                    for name, iTy, minus_flag in temporaries:
                         context.defineTemporaryDefinition(name, iTy)
                     if isinstance(ty, Template) and ty.name in ['stack', 'queue', 'priority_queue']:
                         D = {
@@ -826,12 +844,13 @@ class group_node(base_node):
                             child.container,
                         ))
                     else:
-                        context.print0('for(const %s & %s : %s) {' % (
-                            typeToStr(itemTy), temporary, expr))
+                        context.print0('for(const %s & %s : %s) {' % (typeToStr(itemTy), temporary, expr))
                     if temporary == '$fr':
-                        for i, (name, iTy) in enumerate(temporaries):
-                            context.print0(
-                                ' const %s & %s = get<%s>($fr);' % (iTy, name, i))
+                        for i, (name, iTy, minus_flag) in enumerate(temporaries):
+                            if temporary_is_tuple:
+                                context.print0(' const %s & %s = %sget<%s>($fr);' % (iTy, name, '-' if minus_flag else '', i))
+                            else:
+                                context.print0(' const %s & %s = %s$fr;' % (iTy, name, '-' if minus_flag else ''))
                     context.print('')
                 context.indent()
                 label = context.push_break()
