@@ -19,24 +19,27 @@ class MyIndenter(lark.indenter.Indenter):
     OPEN_PAREN_types = ['LPAR', 'LSQB', 'LBRACE', 'LESS']
     CLOSE_PAREN_types = ['RPAR', 'RSQB', 'RBRACE', 'GREATER']
 
-parser = lark.Lark(grammer, parser='lalr', postlex=MyIndenter())
+parser = lark.Lark(grammer, parser='lalr', postlex=MyIndenter(), propagate_positions=True)
 
 def expand(node):
     if isinstance(node, lark.Token):
         return node.value
     else:
         assert isinstance(node, lark.Tree)
-        return mmcore.__dict__['node_' + node.data](node.data, *(expand(child) for child in node.children))
+        return mmcore.__dict__['node_' + node.data](node.meta.__dict__, node.data, *(expand(child) for child in node.children))
 
 
 def compile_raw(target_path):
     try:
         program = open(target_path).read()
-        print('//#define NDEBUG')
-        print('#ifdef mmlang_source_%s_lines' % (len(program.rstrip().split('\n')), ))
+        print('/** mmlang_source_%s_lines' % (len(program.rstrip().split('\n')), ))
         print()
         print(program.rstrip())
         print()
+        print('*/')
+        print()
+        print('#ifndef MM$DBG')
+        print('#define NDEBUG')
         print('#endif')
         print()
         tree = parser.parse(program)
@@ -69,10 +72,22 @@ def main():
     target_path = None
     output_path = None
     run_flag = False
+    debug_flag = True
+    vis_flag = True
     arg_state = None
     for arg in sys.argv[1:]:
         if arg in ['-run', '--run']:
             run_flag = True
+            continue
+        if arg in ['-ndebug', '--ndebug', '-nodbg', '--nodbg']:
+            debug_flag = False
+            continue
+        if arg in ['-novis', '--novis']:
+            vis_flag = False
+            continue
+        if arg in ['-release', '--release']:
+            vis_flag = False
+            debug_flag = False
             continue
         if arg in ['-o', '-output', '--output']:
             arg_state = 'output'
@@ -85,9 +100,12 @@ def main():
         target_path = arg
     assert arg_state is None, '引数オプション%sの後に必要なパラメータが設定されていません'
     if target_path is None:
-        print('USAGE: mm [--output OUTPUT] [--run] TARGET')
-        print('  --output OUTPUT : output file or folder(.cpp files)')
+        print('USAGE: mm [--output OUTPUT] [--run] [--novis] [--ndebug] [--release] TARGET')
+        print('  --output OUTPUT : output file or folder(.cpp files) (alias: -o)')
         print('  --run           : run mode')
+        print('  --novis         : visualizer off')
+        print('  --ndebug        : debug off (alias: --nodbg)')
+        print('  --release       : visualizer off, debug off')
         print('  TARGET          : target file or folder(.m2 files)')
         exit()
 
@@ -108,7 +126,12 @@ def main():
         if run_flag:
             if os.path.exists('a.out'):
                 os.remove('a.out')
-            subprocess.run(['g++', '-std=gnu++1y', '-DGV_ENABLE', '-O2', output_path])
+            options = []
+            if debug_flag:
+                options.append('-DMM$DBG')
+            if vis_flag:
+                options.append('-DMM$VIS')
+            subprocess.run(['g++', '-std=gnu++1y'] + options + ['-O2', output_path])
             if os.path.exists('a.out'):
                 stdout_flag = False
                 if os.path.exists('result.gv'):

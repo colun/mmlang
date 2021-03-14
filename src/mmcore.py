@@ -66,7 +66,7 @@ class Template:
         return True
 
     def itemType(self):
-        if self.name in ['vector', 'deque', 'list', 'stack', 'queue', 'set', 'multiset']:
+        if self.name in ['vector', 'deque', 'list', 'stack', 'queue', 'set', 'multiset', 'xvector']:
             return self.args[0]
         return None
 
@@ -148,9 +148,9 @@ def isComprehensionType(ty0, ty1):
         return True
     if ty0 == 'double' and ty1 in ['double', 'float', 'int', 'short', 'char', 'bool']:
         return True
-    if ty0 in ['__int128', 'int128'] and ty1 in ['__int128', 'int128', 'long long', 'int64', 'int', 'short', 'char', 'bool']:
+    if ty0 in ['__int128', 'int128'] and ty1 in ['__int128', 'int128', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
         return True
-    if ty0 in ['long long', 'int64'] and ty1 in ['long long', 'int64', 'int', 'short', 'char', 'bool']:
+    if ty0 in ['long long', 'int64', 'size_t'] and ty1 in ['long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
         return True
     if ty0 == 'int' and ty1 in ['int', 'short', 'char', 'bool']:
         return True
@@ -204,6 +204,8 @@ def toStrBoundArg(containerTy, args, upper_flag):
     D = UPPER if upper_flag else LOWER
     itemTy = itemType(containerTy)
     tyArgValue = tuple(arg.getType() for arg in args)
+    if isinstance(itemTy, Template) and itemTy.name=='tuple':
+        itemTy = tuple(itemTy.args)
     if not isinstance(itemTy, tuple):
         assert len(args) <= 1
         return str(args[0]) if len(args) == 1 else D[itemTy]
@@ -326,8 +328,8 @@ class Context:
         m = re.match(r'\$(\d+)$', ret_type)
         if m:
             n = int(m.group(1)) - 1
-            if isinstance(ty, Template):
-                ret_type = ty.args[n]
+            assert isinstance(ty, Template)
+            ret_type = ty.args[n]
         return ret_type
 
     def isDefined(self, name):
@@ -436,6 +438,9 @@ class Context:
         self.breaks_used[-1] += 1
         return self.breaks[-1]
 
+    def get_continue(self):
+        return self.breaks[-1] + 'c'
+
     def get_break_used(self):
         return self.breaks_used[-1]
 
@@ -523,14 +528,16 @@ def compress(src):
 
 class node_multi_stmt(base_node):
 
-    def __init__(self, node_type, *stmts):
+    def __init__(self, meta, node_type, *stmts):
+        self.meta = meta
         self.node_type = node_type
         self.stmts = stmts
 
 
 class group_node(base_node):
 
-    def __init__(self, node_type, *stmts):
+    def __init__(self, meta, node_type, *stmts):
+        self.meta = meta
         self.node_type = node_type
         self.stmts = []
         for stmt in stmts:
@@ -626,8 +633,7 @@ class group_node(base_node):
                 flag = True
                 for i in range(args_len - 1, -1, -1):
                     if flag:
-                        child.args[
-                            i * 2].hintType(child.args[args_len * 2], child.args[i * 2 + 1])
+                        child.args[i * 2].hintType(child.args[args_len * 2], child.args[i * 2 + 1])
                         if child.args[i * 2 + 1] != '=':
                             flag = False
                     child.args[i * 2].countMutate()
@@ -635,6 +641,13 @@ class group_node(base_node):
                 child.child_node.hintType(
                     'int', '-=' if child.op == '--' else '+=')
                 child.child_node.countMutate()
+
+    def printContinueLabel(self, label):
+        context.print('if(false) {')
+        context.indent()
+        context.print('%sc: continue;' % (label, ))
+        context.dedent()
+        context.print('}')
 
     def suite(self):
         context.enterTemporaryDefinition()
@@ -682,9 +695,9 @@ class group_node(base_node):
                     resize_stmts = []
                     if isinstance(child, op2_node) and child.node_type == 'assign':
                         for i in range(len(child.args) - 2, 0, -2):
-                            if child.args[i] == '=' and end is not None:
+                            if child.args[i] == '=' and (end is not None or container is not None):
                                 resize_stmts.extend(
-                                    child.args[i - 1].printResize(end, name))
+                                    child.args[i - 1].printResize('%s.size()' % (container, ) if end is None else end, name))
                     if len(resize_stmts):
                         if not nest_flag:
                             nest_count += 1
@@ -793,7 +806,7 @@ class group_node(base_node):
                 expr = child.container
                 ty = expr.getType()
                 temporary = child.temporary
-                if ty in ['long long', 'int64', 'int', 'short', 'char', 'bool']:
+                if ty in ['long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
                     temporary, minus_flag = expand_minus(temporary)
                     assert isinstance(temporary, node_var)
                     if not minus_flag:
@@ -813,9 +826,9 @@ class group_node(base_node):
                                 assert isinstance(element, node_var)
                                 temporaries.append((element.name, 'auto', minus_flag))
                         else:
-                            assert isinstance(itemTy, tuple)
-                            assert len(temporary.elements) == len(itemTy)
-                            for element, iTy in zip(child.temporary.elements, itemTy):
+                            assert isinstance(itemTy, tuple) or isinstance(itemTy, Template) and itemTy.name=='tuple'
+                            assert len(temporary.elements) == len(itemTy.args if isinstance(itemTy, Template) else itemTy)
+                            for element, iTy in zip(child.temporary.elements, itemTy.args if isinstance(itemTy, Template) else itemTy):
                                 element, minus_flag = expand_minus(element)
                                 assert isinstance(element, node_var)
                                 temporaries.append((element.name, iTy, minus_flag))
@@ -854,6 +867,7 @@ class group_node(base_node):
                     context.print('')
                 context.indent()
                 label = context.push_break()
+                self.printContinueLabel(label)
                 child.suite.suite()
                 if context.get_break_used() == 0:
                     label = None
@@ -873,6 +887,7 @@ class group_node(base_node):
                 context.print('while(%s) {' % (child.conditions, ))
                 context.indent()
                 label = context.push_break()
+                self.printContinueLabel(label)
                 child.suite.suite()
                 if context.get_break_used() == 0:
                     label = None
@@ -904,7 +919,8 @@ node_suite = group_node
 
 class node_funcdef(base_node):
 
-    def __init__(self, node_type, *args):
+    def __init__(self, meta, node_type, *args):
+        self.meta = meta
         self.node_type = node_type
         self.decorators = []
         self.name = None
@@ -1068,6 +1084,7 @@ class node_funcdef(base_node):
             paramTypeMethodDic = {
                 'int': 'nextInt',
                 'int64': 'nextInt64',
+                'float': 'nextFloat',
             }
             for param in self.parameters:
                 context.print('auto %s = %s$so.%s();' % (param.name, self.name, paramTypeMethodDic[param.ty]))
@@ -1118,9 +1135,10 @@ class node_funcdef(base_node):
 
 class node_varhint(base_node):
 
-    def __init__(self, node_type, varname, typehint):
+    def __init__(self, meta, node_type, varname, typehint):
         assert node_type == 'varhint'
         assert isinstance(varname, node_var)
+        self.meta = meta
         self.node_type = node_type
         self.varname = varname
         self.typehint = typehint
@@ -1158,7 +1176,8 @@ class node_varhint(base_node):
 
 class loop_node(base_node):
 
-    def __init__(self, node_type, slice):
+    def __init__(self, meta, node_type, slice):
+        self.meta = meta
         self.slice = slice
 
     def getChildNodes(self):
@@ -1176,7 +1195,7 @@ class loop_node(base_node):
             return
         assert isinstance(self.slice[0], base_node)
         assert isinstance(self.slice[1], base_node)
-        restruct(self, node_varhint, 'varhint', self.slice[0], self.slice[1])
+        restruct(self, node_varhint, self.meta, 'varhint', self.slice[0], self.slice[1])
 
     def visitExecBind(self):
         slice = [i for i in self.slice] + [None]
@@ -1192,7 +1211,7 @@ class loop_node(base_node):
         return 'int'
 
 
-def node_instant(node_type, *args):
+def node_instant(meta, node_type, *args):
     whole_name = None
     name = None
     index = 0
@@ -1223,15 +1242,16 @@ def node_instant(node_type, *args):
         if whole_name is not None:
             ret.reserveBind(whole_name)
     else:
-        ret = loop_node(node_type, slice)
+        ret = loop_node(meta, node_type, slice)
         ret.reserveBind(whole_name)
     return ret
 
 
 class node_var(base_node):
 
-    def __init__(self, node_type, name):
+    def __init__(self, meta, node_type, name):
         assert isinstance(name, str)
+        self.meta = meta
         self.name = name
 
     def toStr(self):
@@ -1276,7 +1296,8 @@ class node_var(base_node):
 
 class node_ref(base_node):
 
-    def __init__(self, node_type, name):
+    def __init__(self, meta, node_type, name):
+        self.meta = meta
         self.name = name
 
     def toStr(self):
@@ -1300,7 +1321,8 @@ def escape(value):
 
 class const_node(base_node):
 
-    def __init__(self, node_type, *args):
+    def __init__(self, meta, node_type, *args):
+        self.meta = meta
         self.node_type = node_type
         if node_type == 'const_true':
             self.value_str = 'true'
@@ -1356,8 +1378,9 @@ node_const_false = const_node
 
 class node_decorator(base_node):
 
-    def __init__(self, node_type, name, args=None):
+    def __init__(self, meta, node_type, name, args=None):
         assert isinstance(name, node_var)
+        self.meta = meta
         self.name = name.name
         if isinstance(args, tuple_node) and args.node_type == 'arguments':
             args = args.elements
@@ -1374,8 +1397,9 @@ class node_decorator(base_node):
 
 class node_argvalue(base_node):
 
-    def __init__(self, node_type, name, value):
+    def __init__(self, meta, node_type, name, value):
         assert isinstance(name, node_var)
+        self.meta = meta
         self.name = name.name
         self.value = value
 
@@ -1388,13 +1412,17 @@ class node_argvalue(base_node):
 
 class node_typedparam(base_node):
 
-    def __init__(self, node_type, name, ty=None):
+    def __init__(self, meta, node_type, name, ty=None):
         assert isinstance(name, node_var)
+        self.meta = meta
         self.name = name.name
-        self.ty = 'int' if ty is None else str(ty)
+        self.referenced = isinstance(ty, node_referencedtype)
+        if self.referenced:
+            ty = ty.ty
+        self.ty = 'int' if ty is None else (ty.getReturnType() if isinstance(ty, call_node) and ty.node_type=='template' else str(ty))
 
     def toStr(self):
-        return '%s %s' % (self.ty, self.name)
+        return '%s%s%s' % (self.ty, ' & ' if self.referenced else ' ', self.name)
 
     def definesParam(self):
         context.definesParam(self.name, self.ty)
@@ -1403,9 +1431,17 @@ class node_typedparam(base_node):
         return []
 
 
+class node_referencedtype(base_node):
+
+    def __init__(self, meta, node_type, ty):
+        self.meta = meta
+        self.ty = ty
+
+
 class call_node(base_node):
 
-    def __init__(self, node_type, func, args=None):
+    def __init__(self, meta, node_type, func, args=None):
+        self.meta = meta
         self.node_type = node_type
         self.func = func
         if args is None:
@@ -1417,13 +1453,13 @@ class call_node(base_node):
         assert isinstance(self.args, tuple)
 
     def visitInclude(self):
-        if self.node_type == 'funccall' and isinstance(self.func, node_getattr) and self.func.member == 'where' and 1 <= len(self.args):
+        if self.node_type == 'funccall' and isinstance(self.func, node_getattr) and self.func.member in ['where', 'eq_to_end', 'eq_to_rend'] and 1 <= len(self.args):
             context.visitInclude('_slice')
 
     def toStr(self):
         if self.node_type == 'getitem':
             ty = self.func.getType()
-            if isinstance(ty, tuple):
+            if isinstance(ty, tuple) or isinstance(ty, Template) and ty.name=='tuple':
                 assert len(self.args) == 1
                 return 'get<%s>(%s)' % (self.args[0], self.func)
             return '%s[%s]' % (self.func, ', '.join(str(arg) for arg in self.args))
@@ -1440,9 +1476,9 @@ class call_node(base_node):
                     return '({ auto ret = %s.back(); %s.pop_back(); ret; })' % (self.func.obj, self.func.obj, )
                 if self.func.member == 'shift' and ty.name == 'deque':
                     return '({ auto ret = %s.front(); %s.pop_front(); ret; })' % (self.func.obj, self.func.obj, )
-        if self.node_type == 'funccall' and isinstance(self.func, node_getattr) and self.func.member in ['lower_bound', 'upper_bound', 'bound', 'where']:
+        if self.node_type == 'funccall' and isinstance(self.func, node_getattr) and self.func.member in ['lower_bound', 'upper_bound', 'bound', 'where', 'eq_to_end', 'eq_to_rend']:
             ty = self.func.obj.getType()
-            if isinstance(ty, Template) and ty.name in ['vector', 'deque']:
+            if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'xvector']:
                 if self.func.member in ['lower_bound', 'upper_bound']:
                     if 1 <= len(self.args):
                         args = toStrBoundArg(
@@ -1450,18 +1486,23 @@ class call_node(base_node):
                         return '(int)(%s(%s.begin(), %s.end(), %s) - %s.begin())' % (self.func.member, self.func.obj, self.func.obj, args, self.func.obj)
                     else:
                         return '(int)%s.size()' % (self.func.member, ) if self.func.member == 'upper_bound' else '0'
-                elif self.func.member == 'where':
-                    if 1 <= len(self.args):
-                        return '_slice(lower_bound(%s.begin(), %s.end(), %s), upper_bound(%s.begin(), %s.end(), %s))' % (
-                            self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, False), self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, True))
-                    else:
-                        return self.func.member
-                elif self.func.member == 'bound':
-                    if 1 <= len(self.args):
-                        return 'range(lower_bound(%s.begin(), %s.end(), %s)-%s.begin(), upper_bound(%s.begin(), %s.end(), %s)-%s.begin())' % (
-                            self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, False), self.func.obj, self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, True), self.func.obj)
-                    else:
-                        return self.func.member
+                if self.func.member == 'where' and 1 <= len(self.args):
+                    return '_slice(lower_bound(%s.begin(), %s.end(), %s), upper_bound(%s.begin(), %s.end(), %s))' % (
+                        self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, False), self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, True))
+                if self.func.member == 'bound' and 1 <= len(self.args):
+                    return 'range(lower_bound(%s.begin(), %s.end(), %s)-%s.begin(), upper_bound(%s.begin(), %s.end(), %s)-%s.begin())' % (
+                        self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, False), self.func.obj, self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, True), self.func.obj)
+                if self.func.member=='eq_to_end':
+                    return '_slice(std::lower_bound(%s.begin(), %s.end(), %s), %s.end())' % (self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, False), self.func.obj)
+                if self.func.member=='eq_to_rend':
+                    return '_slice((decltype(%s.rbegin()))std::upper_bound(%s.begin(), %s.end(), %s), %s.rend())' % (self.func.obj, self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, True), self.func.obj)
+            if isinstance(ty, Template) and ty.name in ['set', 'multiset']:
+                if self.func.member=='where':
+                    return '_slice(%s.lower_bound(%s), %s.upper_bound(%s))' % (self.func.obj, toStrBoundArg(ty, self.args, False), self.func.obj, toStrBoundArg(ty, self.args, True))
+                if self.func.member=='eq_to_end':
+                    return '_slice(%s.lower_bound(%s), %s.end())' % (self.func.obj, toStrBoundArg(ty, self.args, False), self.func.obj)
+                if self.func.member=='eq_to_rend':
+                    return '_slice((decltype(%s.rbegin()))%s.upper_bound(%s), %s.rend())' % (self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, True), self.func.obj)
         if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['int', 'int64', 'int128', 'float'] and len(self.args) == 1:
             D = {
                 'int': '(int)',
@@ -1500,7 +1541,7 @@ class call_node(base_node):
             if isinstance(self.func, node_var) and self.func.name == 'move' and len(self.args) == 1:
                 return self.args[0].getType()
             if isinstance(self.func, node_getattr):
-                if self.func.member == 'where':
+                if self.func.member in ['where', 'eq_to_end', 'eq_to_rend']:
                     return self.func.obj.getType()
                 if self.func.member == 'bound':
                     return Template('vector', ['int'])
@@ -1517,6 +1558,9 @@ class call_node(base_node):
             if isinstance(ty, tuple):
                 assert isinstance(self.args[0], const_node)
                 return ty[int(self.args[0].toStr())]
+            if isinstance(ty, Template) and ty.name=='tuple':
+                assert isinstance(self.args[0], const_node)
+                return ty.args[int(self.args[0].toStr())]
             return context.getMethodReturnType(ty, '__getitem__')
         elif self.node_type == 'template':
             TODO
@@ -1568,6 +1612,8 @@ class call_node(base_node):
                 for arg in self.args:
                     arg.reserveBind()
                 self.func.obj.reserveBind()
+            elif self.func.member in ['eq_to_end', 'eq_to_rend']:
+                self.func.obj.reserveBind()
 
     def printResize(self, size, name):
         if self.node_type == 'getitem' and len(self.args) == 1:
@@ -1590,8 +1636,9 @@ node_funccall = call_node
 
 class node_getattr(base_node):
 
-    def __init__(self, node_type, obj, member):
+    def __init__(self, meta, node_type, obj, member):
         assert isinstance(member, node_var)
+        self.meta = meta
         self.obj = obj
         self.member = member.name
 
@@ -1602,22 +1649,26 @@ class node_getattr(base_node):
         return [self.obj, self.member]
 
     def getReturnType(self):
+        ty = self.obj.getType()
+
         if self.member in ['pop', 'shift', 'top', 'back', 'front']:
-            ty = self.obj.getType()
             if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'queue', 'priority_queue', 'stack'] and 1 <= len(ty.args):
                 return ty.args[0]
         if self.member in ['lower_bound', 'upper_bound']:
             return 'int'
         if self.member in ['substr']:
             return 'string'
+        if isinstance(ty, Template):
+            return context.getMethodReturnType(ty, self.member)
         return 'int'
 
 
 class tuple_node(base_node):
 
-    def __init__(self, node_type, *elements):
+    def __init__(self, meta, node_type, *elements):
         if node_type == 'noinstant_tuple':
             node_type = 'tuple'
+        self.meta = meta
         self.node_type = node_type
         if node_type == 'list':
             assert len(elements) == 1
@@ -1685,6 +1736,8 @@ class tuple_node(base_node):
         else:
             if isinstance(ty, base_node):
                 ty = ty.getType()
+            if isinstance(ty, Template) and ty.name=='tuple':
+                ty = tuple(ty.args)
             if not isinstance(ty, tuple):
                 print('hintType', ty)
             assert isinstance(ty, tuple)
@@ -1716,7 +1769,8 @@ node_arguments = tuple_node
 
 class node_mod(base_node):
 
-    def __init__(self, node_type, child):
+    def __init__(self, meta, node_type, child):
+        self.meta = meta
         self.child = child
 
     def toStr(self):
@@ -1728,7 +1782,8 @@ class node_mod(base_node):
 
 class op2_node(base_node):
 
-    def __init__(self, node_type, *args):
+    def __init__(self, meta, node_type, *args):
+        self.meta = meta
         mod = None
         if node_type == 'assign' and len(args) % 2 == 0:
             mod = args[-1]
@@ -1834,7 +1889,8 @@ node_assign = op2_node
 
 class op2f_node(base_node):
 
-    def __init__(self, node_type, *args):
+    def __init__(self, meta, node_type, *args):
+        self.meta = meta
         self.node_type = node_type
         self.args = args
         self.op = [node_type]
@@ -1870,7 +1926,8 @@ node_bit_and = op2f_node
 
 class pre_op1_node(base_node):
 
-    def __init__(self, node_type, child_node):
+    def __init__(self, meta, node_type, child_node):
+        self.meta = meta
         self.node_type = node_type
         self.child_node = child_node
         self.op = pre_op1_dic[node_type]
@@ -1903,7 +1960,8 @@ node_bit_not = pre_op1_node
 
 class post_op1_node(base_node):
 
-    def __init__(self, node_type, child_node):
+    def __init__(self, meta, node_type, child_node):
+        self.meta = meta
         self.node_type = node_type
         self.child_node = child_node
         self.op = post_op1_dic[node_type]
@@ -1925,7 +1983,8 @@ node_post_dec = post_op1_node
 
 class node_if_stmt(base_node):
 
-    def __init__(self, node_type, if_conditions, if_suite, *args):
+    def __init__(self, meta, node_type, if_conditions, if_suite, *args):
+        self.meta = meta
         self.if_data = (if_conditions, if_suite)
         self.elif_data = [(args[i * 2], args[i * 2 + 1])
                           for i in range(len(args) // 2)]
@@ -1964,7 +2023,8 @@ class node_if_stmt(base_node):
 
 class node_assert_stmt(base_node):
 
-    def __init__(self, node_type, conditions, message=None):
+    def __init__(self, meta, node_type, conditions, message=None):
+        self.meta = meta
         self.conditions = conditions
         self.message = message
 
@@ -1977,7 +2037,8 @@ class node_assert_stmt(base_node):
 
 class node_test(base_node):
 
-    def __init__(self, node_type, conditions, true_value, false_value):
+    def __init__(self, meta, node_type, conditions, true_value, false_value):
+        self.meta = meta
         self.conditions = conditions
         self.true_value = true_value
         self.false_value = false_value
@@ -1994,7 +2055,8 @@ class node_test(base_node):
 
 class node_parenthesis(base_node):
 
-    def __init__(self, node_type, child_node):
+    def __init__(self, meta, node_type, child_node):
+        self.meta = meta
         self.child_node = child_node
 
     def toStr(self):
@@ -2011,7 +2073,8 @@ class node_parenthesis(base_node):
 
 class node_while_stmt(base_node):
 
-    def __init__(self, node_type, conditions, suite, else_suite=None):
+    def __init__(self, meta, node_type, conditions, suite, else_suite=None):
+        self.meta = meta
         self.conditions = conditions
         self.suite = suite
         self.else_suite = else_suite
@@ -2037,7 +2100,8 @@ class node_while_stmt(base_node):
 
 class node_for_stmt(base_node):
 
-    def __init__(self, node_type, temporary, container, suite, else_suite=None):
+    def __init__(self, meta, node_type, temporary, container, suite, else_suite=None):
+        self.meta = meta
         self.temporary = temporary
         self.container = container
         self.suite = suite
@@ -2062,8 +2126,8 @@ class node_for_stmt(base_node):
 
 class node_break_stmt(base_node):
 
-    def __init__(self, node_type):
-        pass
+    def __init__(self, meta, node_type):
+        self.meta = meta
 
     def toStr(self):
         return 'goto %s' % context.get_break()
@@ -2074,11 +2138,11 @@ class node_break_stmt(base_node):
 
 class node_continue_stmt(base_node):
 
-    def __init__(self, node_type):
-        pass
+    def __init__(self, meta, node_type):
+        self.meta = meta
 
     def toStr(self):
-        return 'continue'
+        return 'goto %s' % context.get_continue()
 
     def getChildNodes(self):
         return []
@@ -2086,7 +2150,8 @@ class node_continue_stmt(base_node):
 
 class node_return_stmt(base_node):
 
-    def __init__(self, node_type, expr=None):
+    def __init__(self, meta, node_type, expr=None):
+        self.meta = meta
         self.expr = expr
 
     def toStr(self):
@@ -2100,7 +2165,7 @@ class node_return_stmt(base_node):
         return []
 
 
-def symbol_node(node_type, *op):
+def symbol_node(meta, node_type, *op):
     return ' '.join(op)
 
 
@@ -2114,8 +2179,8 @@ node_instant_op = symbol_node
 
 class node_pass_stmt(base_node):
 
-    def __init__(self, node_type):
-        pass
+    def __init__(self, meta, node_type):
+        self.meta = meta
 
     def toStr(self):
         return ''

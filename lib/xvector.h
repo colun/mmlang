@@ -1,14 +1,18 @@
-template<typename T, int N> class xvector {
+template<typename T, int N, bool use_xmem=true> class xvector {
 private:
     int count;
     fast_array<T, N> data_;
 public:
     inline xvector() : count(0) {
-        xmem::init(this);
+        if(use_xmem) {
+            xmem::init(this);
+        }
     }
     inline void set(int i, const T & o) {
         assert(0<=i && i<count);
-        xmem::modify(&data_[i], sizeof(data_[i]));
+        if(use_xmem) {
+            xmem::modify(&data_[i], sizeof(data_[i]));
+        }
         data_[i] = o;
     }
     inline const T & get(int i) const {
@@ -16,7 +20,9 @@ public:
         return data_[i];
     }
     inline void clear() {
-        xmem::modify(&count, sizeof(count));
+        if(use_xmem) {
+            xmem::modify(&count, sizeof(count));
+        }
         count = 0;
     }
     inline bool empty() const {
@@ -30,7 +36,7 @@ public:
     }
     template<class TyIt> inline void assign(TyIt st, TyIt et) {
         int cnt = 0;
-        if(xmem::enabled()) {
+        if(use_xmem && xmem::enabled()) {
             TyIt it = st;
             while(it!=et) {
                 assert(cnt<N);
@@ -51,50 +57,68 @@ public:
     }
     inline void push_back(const T & value) {
         assert(0<=count && count<N);
-        xmem::modify(&count, sizeof(count));
-        xmem::modify(&data_[count], sizeof(T));
+        if(use_xmem) {
+            xmem::modify(&count, sizeof(count));
+            xmem::modify(&data_[count], sizeof(T));
+        }
         data_[count] = value;
         ++count;
     }
     template<class... TyArgs> inline void emplace_back(TyArgs&&... args) {
         assert(0<=count && count<N);
-        xmem::modify(&count, sizeof(count));
-        xmem::modify(&data_[count], sizeof(T));
+        if(use_xmem) {
+            xmem::modify(&count, sizeof(count));
+            xmem::modify(&data_[count], sizeof(T));
+        }
         ::new(&data_[count])T(std::forward<TyArgs>(args)...);
         ++count;
     }
     inline xref<T> let_back() {
         assert(0<=count && count<N);
-        xmem::modify(&count, sizeof(count));
+        if(use_xmem) {
+            xmem::modify(&count, sizeof(count));
+        }
         return xref<T>(data_ + (count++));
     }
     inline void pop_back() {
         assert(0<count);
-        xmem::modify(&count, sizeof(count));
+        if(use_xmem) {
+            xmem::modify(&count, sizeof(count));
+        }
         --count;
     }
     inline const T & pop_back_with_value() {
         assert(0<count);
-        xmem::modify(&count, sizeof(count));
+        if(use_xmem) {
+            xmem::modify(&count, sizeof(count));
+        }
         --count;
         return data_[count];
     }
     inline void pop_swap_back(int i) {
         assert(0<=i && i<count);
-        xmem::modify(&count, sizeof(count));
+        if(use_xmem) {
+            xmem::modify(&count, sizeof(count));
+        }
         --count;
         if likely(i!=count) {
-            xmem::modify(&data_[i], sizeof(data_[i]));
+            if(use_xmem) {
+                xmem::modify(&data_[i], sizeof(data_[i]));
+            }
             data_[i] = data_[count];
         }
     }
     inline T pop_swap_back_with_value(int i) {
         assert(0<=i && i<count);
-        xmem::modify(&count, sizeof(count));
+        if(use_xmem) {
+            xmem::modify(&count, sizeof(count));
+        }
         --count;
         T ret = data_[i];
         if likely(i!=count) {
-            xmem::modify(&data_[i], sizeof(data_[i]));
+            if(use_xmem) {
+                xmem::modify(&data_[i], sizeof(data_[i]));
+            }
             data_[i] = data_[count];
         }
         return ret;
@@ -120,9 +144,13 @@ public:
     }
     inline void resize(int n, const T & value) {
         assert(0<=n && n<=N);
-        xmem::modify(&count, sizeof(count));
+        if(use_xmem) {
+            xmem::modify(&count, sizeof(count));
+        }
         if(count<n) {
-            xmem::modify(&data_[count], sizeof(*data_)*(n-count));
+            if(use_xmem) {
+                xmem::modify(&data_[count], sizeof(*data_)*(n-count));
+            }
             for(int i=count; i<n; ++i) {
                 data_[i] = value;
             }
@@ -131,7 +159,9 @@ public:
     }
     inline void resize(int n) {
         assert(0<=n && n<=N);
-        xmem::modify(&count, sizeof(count));
+        if(use_xmem) {
+            xmem::modify(&count, sizeof(count));
+        }
         count = n;
     }
     inline const T * data() const {
@@ -142,6 +172,73 @@ public:
     }
     inline const T * end() const {
         return data_.data()+count;
+    }
+    inline std::reverse_iterator<const T *> rbegin() const {
+        return std::reverse_iterator<const T *>(end());
+    }
+    inline std::reverse_iterator<const T *> rend() const {
+        return std::reverse_iterator<const T *>(begin());
+    }
+    inline void sort() {
+        if(use_xmem) {
+            assert(!xmem::enabled());
+        }
+        std::sort(data_.data(), data_.data()+count);
+    }
+    inline void replace(const T & from, const T & to) {
+        if(from==to) {
+            return;
+        }
+        T * p = std::lower_bound(data_.data(), data_.data()+count, from);
+        assert(p!=end());
+        assert(*p==from);
+        if(from<to) {
+            T * e = (T*)end();
+            if(use_xmem) {
+                T * ep = p+1;
+                while(ep<e && *ep<to) {
+                    ++ep;
+                }
+                --ep;
+                xmem::modify(p, sizeof(*p)*(ep-p+1));
+                while(p<ep) {
+                    *p = p[1];
+                    ++p;
+                }
+            }
+            else {
+                ++p;
+                while(p<e && *p<to) {
+                    p[-1] = *p;
+                    ++p;
+                }
+                --p;
+            }
+        }
+        else {
+            T * b = (T*)begin();
+            if(use_xmem) {
+                T * ep = p-1;
+                while(b<=ep && to<*ep) {
+                    --ep;
+                }
+                ++ep;
+                xmem::modify(ep, sizeof(*ep)*(p-ep+1));
+                while(ep<p) {
+                    *p = p[-1];
+                    --p;
+                }
+            }
+            else {
+                --p;
+                while(b<=p && to<*p) {
+                    p[1] = *p;
+                    --p;
+                }
+                ++p;
+            }
+        }
+        *p = to;
     }
     inline xref<T> operator[] (int i) {
         assert(0<=i && i<count);

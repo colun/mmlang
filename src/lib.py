@@ -23,7 +23,11 @@ func_definition = {
     'sin': ('double', 'cmath'),
     'sqrt': ('double', 'cmath'),
     'log2': ('double', 'cmath'),
+    'log': ('double', 'cmath'),
     'exp2': ('double', 'cmath'),
+    'exp': ('double', 'cmath'),
+    'pow': ('double', 'cmath'),
+    'floor': ('double', 'cmath'),
     'ceil': ('double', 'cmath'),
     'abs': (None, 'cmath'),
     'BIT': (None, 'BIT.h'),
@@ -42,6 +46,7 @@ func_definition = {
     'drand49': ('double', 'drand49.h'),
     'mrand49': ('int', 'mrand49.h'),
     'mmrand49': ('long long', 'mmrand49.h'),
+    'srand49': (None, 'srand49.h'),
     'initTime': (None, 'get_time.h'),
     'getTime': ('double', 'get_time.h'),
     'getCpuClock': (None, 'get_cpu_clock.h'),
@@ -69,6 +74,7 @@ dependency = {
     'fast_array.h': ['cassert'],
     'zobrist.h': ['cassert', 'mrand49.h', 'mmrand49.h'],
     'mmrand49.h': ['mrand49.h'],
+    'srand49.h': ['mrand49.h'],
     'fast_weak_set32.h': ['cstring', 'cassert', 'fast_array.h'],
     'fast_weak_set64.h': ['cstring', 'cassert', 'fast_array.h'],
     'get_native_time.h': ['sys/time.h'],
@@ -76,12 +82,13 @@ dependency = {
     'dpque.h': ['vector', 'utility'],
     'xmem.h': ['cassert', 'cstring', 'unlikely.h'],
     'xarray.h': ['cassert', 'xmem.h', 'fast_array.h', 'xref.h'],
-    'xvector.h': ['cassert', 'xmem.h', 'fast_array.h', 'xref.h', 'likely.h', 'unlikely.h'],
+    'xvector.h': ['cassert', 'iterator', 'algorithm', 'xmem.h', 'fast_array.h', 'xref.h', 'likely.h', 'unlikely.h'],
+    'xpque.h': ['cassert', 'xmem.h', 'fast_array.h'],
     'xbeam.h': ['get_time.h', 'fast_pool.h', 'dpque.h'],
     'lrand49.h': ['mrand49.h', 'asm_mul_hi.h'],
     'drand49.h': ['mrand49.h'],
     'mmrand49.h': ['mrand49.h'],
-    'gv.h': ['cstdarg', 'cmath'],
+    'gv.h': ['cstdarg', 'cmath', 'get_time.h'],
 }
 nocompress = set([
 ])
@@ -145,9 +152,12 @@ class_definition = {
         'size': 'int',
         '__getitem__': '$1',
     }, 'xvector.h'),
-    'zobrist': ({
+    'xpque': ({
+        'size': 'int',
         '__getitem__': '$1',
-    }, 'zobrist.h'),
+        'top': '$1',
+        'empty': 'bool',
+    }, 'xpque.h'),
     'fast_array': ({
         '__getitem__': '$1',
     }, 'fast_array.h'),
@@ -158,4 +168,6 @@ class_definition = {
     }, 'fast_weak_set32.h'),
     'fast_weak_set64': ({
     }, 'fast_weak_set64.h'),
+    'set': ({
+    }, 'set'),
 }

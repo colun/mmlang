@@ -18,7 +18,8 @@ funcdef: decorator* "def" var "(" parameters? ")" ["->" test] ":" suite
 decorator: "@" var [ "(" [arguments] ")" ] _NEWLINE
 parameters: paramvalue ("," paramvalue)*
 ?paramvalue: typedparam ["=" test]
-typedparam: var [":" test]
+typedparam: var [":" (referencedtype|test)]
+referencedtype: "&" test
 ?arguments: argvalue ("," argvalue)*
 ?argvalue: test ["=" test]
 
