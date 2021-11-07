@@ -2,7 +2,7 @@ MM Language
 ===========
 
 MM Languageは、競技プログラミングのために開発中のプログラミング言語です。
-どんなことが可能なのかは、examplesおよびexamples_outputsを参照ください。
+どんなことが可能なのかは、examplesをご参照ください。
 
 まだ開発中の言語であるため、諸々不備があり、コンパイルエラーの行数表示さえまともに出せない状態です。
 慣れて使うしかない様なヒドい状態ですので、ご容赦ください。
@@ -36,17 +36,27 @@ kimiyukiさん解釈だと現状のライセンスなしの状態であれば競
 python3のインストールおよび、 `python3 -m pip install lark-parser` などでのlark-parserのインストールが必要となります。
 mmにパスを通して、任意の場所から起動してください。以下の様なUSAGEが表示されます。
 
-    USAGE: mm [--output OUTPUT] [--run] TARGET
-      --output OUTPUT : output file or folder(.cpp files)
-      --run           : run mode
-      TARGET          : target file or folder(.m2 files)
+    usage: mm.py [-h] [--output OUTPUT] [--build] [--run] [--test] [--test-size N]
+                 [--test-seed N] [--test1] [--test-name NAME] [--workers N]
+                 [--profiler] [--ndebug] [--novis] [--release] [--ac-gen]
+                 [--ac-test] [--ac-submit] [--ac-submit-folder] [--ac-submit2]
+                 SOURCE
+    mm.py: error: the following arguments are required: SOURCE
 
-TARGETのみの指定の場合、TARGETは.m2ファイルである必要があり、生成されたC++コードは標準出力に表示されます。
+SOURCEのみの指定の場合、SOURCEは.m2ファイルである必要があり、生成されたC++コードは標準出力に表示されます。
 --outputを指定した場合、標準出力の代わりに、OUTPUTへと生成されたC++コードが保存されます。
 
 TARGETがフォルダのとき、OUTPUTもフォルダである必要があります。その場合、再帰的に.m2ファイルを探し出し、OUTPUTの対応する場所へと生成されたC++コードを保存します。
 
-すなわち、examples_outputsは、以下の様なコマンドにて一括コンパイルしています。
+すなわち、従来のバージョンで存在したexamples_outputsは、以下の様なコマンドにて一括コンパイルされていました。
+
+    mm ./examples --output ./examples_outputs
+
+現在ではatcoder-tools対応によって、examples_outputsのメンテは破棄されています。
+
+代わりに、 `python3 -m pip install atcoder-tools` をインストールの上で、以下のコマンドを実行することで、過去のテストに通過している状態を保っていることを確認しています。
+
+    mm ./examples --ac-test
 
 ユーザー自作のC++ライブラリの追加について
 ---------------------------

@@ -1,3 +1,4 @@
+# atcoder: abc173_b
 N = inputInt()
 S[:N] = inputWord()
 W = ["AC", "WA", "TLE", "RE"]

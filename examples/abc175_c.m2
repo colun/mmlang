@@ -1,3 +1,4 @@
+# atcoder: abc175_c
 X, K, D = abs(inputInt128()), inputInt128(), inputInt128()
 if K<=X/D:
     print(X-K*D)

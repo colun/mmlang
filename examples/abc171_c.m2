@@ -1,3 +1,4 @@
+# atcoder: abc171_c
 N = inputInt64()
 ret = string()
 while N:

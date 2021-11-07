@@ -1,3 +1,4 @@
+# atcoder: abc177_c
 N = inputInt()
 A[:N] = inputInt()
 sum = 0

@@ -1,3 +1,4 @@
+# atcoder: abc171_b
 N, K = inputInt(), inputInt()
 p[:N] = inputInt()
 p.sort()

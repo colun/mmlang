@@ -1,3 +1,4 @@
+# atcoder: abc169_d
 N = inputInt64()
 ret = 0
 for i in range(2, 1000001):

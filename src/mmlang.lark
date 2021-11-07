@@ -1,4 +1,4 @@
-start: stmt*
+start: _NEWLINE? stmt*
 ?stmt: multi_stmt | if_stmt | while_stmt | for_stmt | funcdef
 ?multi_stmt: single_stmt (";" single_stmt)* [";"] _NEWLINE
 ?single_stmt: assign | pass_stmt | break_stmt | continue_stmt | return_stmt | assert_stmt
@@ -18,7 +18,8 @@ funcdef: decorator* "def" var "(" parameters? ")" ["->" test] ":" suite
 decorator: "@" var [ "(" [arguments] ")" ] _NEWLINE
 parameters: paramvalue ("," paramvalue)*
 ?paramvalue: typedparam ["=" test]
-typedparam: var [":" test]
+typedparam: var [":" (referencedtype|test)]
+referencedtype: "&" test
 ?arguments: argvalue ("," argvalue)*
 ?argvalue: test ["=" test]
 

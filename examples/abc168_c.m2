@@ -1,3 +1,4 @@
+# atcoder: abc168_c
 A, B, H, M = inputInt(), inputInt(), inputInt(), inputInt()
 M /= 60.0
 H = (H + M) / 12.0

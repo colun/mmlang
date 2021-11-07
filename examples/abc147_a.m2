@@ -1,3 +1,4 @@
+# atcoder: abc147_a
 N = 3
 A[i@:N] = inputInt()
 assert 1 <= A[:] <= 13

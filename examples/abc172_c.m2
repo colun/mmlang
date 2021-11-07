@@ -1,3 +1,4 @@
+# atcoder: abc172_c
 N, M, K = inputInt(), inputInt(), inputInt64()
 A[:N] = inputInt64()
 B[:M] = inputInt64()

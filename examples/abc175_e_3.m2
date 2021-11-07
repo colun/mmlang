@@ -1,3 +1,4 @@
+# atcoder: abc175_e
 R, C, K = inputInt(), inputInt(), inputInt()
 rcv[:K] = inputInt() - 1, inputInt() - 1, inputInt()
 rcv.sort()

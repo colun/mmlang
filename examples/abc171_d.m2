@@ -1,3 +1,4 @@
+# atcoder: abc171_d
 N = inputInt()
 A[:N] = inputInt()
 Q = inputInt()

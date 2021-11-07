@@ -1,4 +1,4 @@
-template<int N=16777216>class fast_weak_set64 {
+template<int N=1048576>class fast_weak_set64 {
 private:
     const unsigned int mask = N - 1;
     fast_array<unsigned int, N> memo;

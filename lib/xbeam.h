@@ -51,11 +51,7 @@ struct xbeam {
     ranking * current_ranking = NULL;
     ranking * next_ranking = NULL;
     char * input_mem = 0;
-    char * mymem = 0;
-    int mymemsize = 0;
-    std::vector<char*> mymem_used;
-    std::vector<char*> mymem_unused;
-    std::vector<char*> mymem_current;
+    xnodemem nmem;
     double nextLimit;
     double wholeLimit;
     int remain_depth;
@@ -93,6 +89,8 @@ struct xbeam {
             nextLimit = (wholeLimit - t) / remain_depth + t;
             infoDepthStartTime = infoStartTime = t;
         }
+        nmem.free2();
+        nmem.free2();
         current_node = xbeam$node::create();
         if(current_ranking) {
             clear_ranking(current_ranking);
@@ -186,12 +184,7 @@ struct xbeam {
             --remain_depth;
             clear_ranking(current_ranking);
             std::swap(current_ranking, next_ranking);
-            for(char * p : mymem_current) {
-                mymem_unused.emplace_back(p);
-            }
-            mymem_current.swap(mymem_used);
-            mymem_used.clear();
-            mymemsize = 0;
+            nmem.free2();
         }
         if(current_ranking->empty()) {
             dest_(t);
@@ -217,57 +210,28 @@ struct xbeam {
             next_ranking->small().second->release();
             next_ranking->pop_small();
         }
-        if(mymemsize<4096) {
-            mymemsize = 1048576 - 256;
-            if(mymem_unused.empty()) {
-                mymem = (char*)std::malloc(mymemsize);
-            }
-            else {
-                mymem = mymem_unused.back();
-                mymem_unused.pop_back();
-            }
-            mymem_used.emplace_back(mymem);
-        }
         //TODO: ハッシュの扱いをどうする？→ハッシュはnextIntで突っ込んでおけば大丈夫。
-        next_ranking->emplace(score, xbeam$node::create(current_node, mymem));
+        next_ranking->emplace(score, xbeam$node::create(current_node, nmem.alloc()));
         return true;
     }
     //以下、シリアライズ系
     void nextDouble(double value) {
-        mymemsize -= sizeof(value);
-        assert(0<=mymemsize);
-        *(double*)mymem = value;
-        mymem += sizeof(value);
+        nmem.next(value);
     }
     void nextFloat(float value) {
-        mymemsize -= sizeof(value);
-        assert(0<=mymemsize);
-        *(float*)mymem = value;
-        mymem += sizeof(value);
+        nmem.next(value);
     }
     void nextInt64(long long value) {
-        mymemsize -= sizeof(value);
-        assert(0<=mymemsize);
-        *(long long*)mymem = value;
-        mymem += sizeof(value);
+        nmem.next(value);
     }
     void nextInt(int value) {
-        mymemsize -= sizeof(value);
-        assert(0<=mymemsize);
-        *(int*)mymem = value;
-        mymem += sizeof(value);
+        nmem.next(value);
     }
     void nextShort(short value) {
-        mymemsize -= sizeof(value);
-        assert(0<=mymemsize);
-        *(short*)mymem = value;
-        mymem += sizeof(value);
+        nmem.next(value);
     }
     void nextChar(char value) {
-        mymemsize -= sizeof(value);
-        assert(0<=mymemsize);
-        *(char*)mymem = value;
-        mymem += sizeof(value);
+        nmem.next(value);
     }
     double nextDouble() {
         double ret = *(double*)input_mem;

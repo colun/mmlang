@@ -1,3 +1,4 @@
+# atcoder: abc177_e
 N = inputInt()
 A[:N] = inputInt()
 B[:1e3 + 10] = 0

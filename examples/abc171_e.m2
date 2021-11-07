@@ -1,3 +1,4 @@
+# atcoder: abc171_e
 N = inputInt()
 a[:N] = inputInt()
 x = 0

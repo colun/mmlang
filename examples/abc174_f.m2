@@ -1,3 +1,4 @@
+# atcoder: abc174_f
 N, Q = inputInt(), inputInt()
 c[:N] = inputInt() - 1
 LR[:Q] = inputInt() - 1, inputInt() - 1, $1

@@ -1,3 +1,4 @@
+# atcoder: abc168_b
 K = inputInt()
 S = inputWord()
 if S.size()<=K:

@@ -10,27 +10,27 @@ public:
         assert((N&(N-1))==0);
     }
     inline bool test(int hash) const {
-        int key = hash & mask;
+        unsigned int key = hash & mask;
         unsigned short hi = hash >> 16;
         if(hi==0) {
             hi = 1;
         }
         return memo[key]==hi;
     }
-    inline void set(long long hash) {
-        int key = hash & mask;
+    inline void set(int hash) {
+        unsigned int key = hash & mask;
         unsigned short hi = hash >> 16;
         if(hi==0) {
             hi = 1;
         }
         memo[key] = hi;
     }
-    inline void reset(long long hash) {
-        int key = hash & mask;
+    inline void reset(int hash) {
+        unsigned int key = hash & mask;
         memo[key] = 0;
     }
-    inline bool testWithSet(long long hash) {
-        int key = hash & mask;
+    inline bool testWithSet(int hash) {
+        unsigned int key = hash & mask;
         unsigned short hi = hash >> 16;
         if(hi==0) {
             hi = 1;

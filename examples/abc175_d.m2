@@ -1,3 +1,4 @@
+# atcoder: abc175_d
 N, K = inputInt(), inputInt()
 P[:N] = inputInt()-1
 C[:N] = inputInt()

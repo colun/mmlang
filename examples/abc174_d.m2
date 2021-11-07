@@ -1,3 +1,4 @@
+# atcoder: abc174_d
 N = inputInt()
 c = inputWord()
 R = 0
