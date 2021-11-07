@@ -1,3 +1,4 @@
+# atcoder: abc169_b
 N = inputInt()
 A[:N] = inputInt128()
 ZERO = 0

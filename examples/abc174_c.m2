@@ -1,3 +1,4 @@
+# atcoder: abc174_c
 K = inputInt()
 X = 7 mod K
 for i in range(K):

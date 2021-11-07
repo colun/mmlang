@@ -1,3 +1,4 @@
+# atcoder: agc047_a
 N = inputInt()
 B[:N] = 0, 0
 for i in range(N):

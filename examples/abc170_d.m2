@@ -1,3 +1,4 @@
+# atcoder: abc170_d
 N = inputInt()
 A[:N] = inputInt()
 D[:1e6 + 8] = 0

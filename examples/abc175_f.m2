@@ -1,3 +1,4 @@
+# atcoder: abc175_f
 N = inputInt()
 S[:N], C[$1] = inputWord(), inputInt()
 R[:N] = S[$1]

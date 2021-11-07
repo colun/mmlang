@@ -78,7 +78,7 @@ public:
         if(use_xmem) {
             xmem::modify(&count, sizeof(count));
         }
-        return xref<T>(data_ + (count++));
+        return xref<T>(data_.data() + (count++));
     }
     inline void pop_back() {
         assert(0<count);
@@ -125,7 +125,7 @@ public:
     }
     inline xref<T> front() {
         assert(0<count);
-        return xref<T>(data_);
+        return xref<T>(data_.data());
     }
     inline const T & front() const {
         assert(0<count);
@@ -133,7 +133,7 @@ public:
     }
     inline xref<T> back() {
         assert(0<count);
-        return xref<T>(data_ + (count-1));
+        return xref<T>(data_.data() + (count-1));
     }
     inline const T & back() const {
         assert(0<count);
@@ -149,7 +149,7 @@ public:
         }
         if(count<n) {
             if(use_xmem) {
-                xmem::modify(&data_[count], sizeof(*data_)*(n-count));
+                xmem::modify(&data_[count], sizeof(*data_.data())*(n-count));
             }
             for(int i=count; i<n; ++i) {
                 data_[i] = value;

@@ -7,6 +7,7 @@ SRC_DIR = os.path.dirname(__file__)
 ROOT_DIR = os.path.dirname(SRC_DIR)
 LIB_DIR = os.path.join(ROOT_DIR, 'lib')
 
+
 def restruct(obj, new_class, *args, **kargs):
     if '__del__' in dir(obj):
         obj.__del__()
@@ -18,18 +19,19 @@ def restruct(obj, new_class, *args, **kargs):
 def typeToStr(ty):
     if ty is None:
         return 'int'
+    assert not isinstance(ty, tuple)
     if isinstance(ty, tuple):
         return ('tuple<%s>' % (', '.join([typeToStr(t) for t in ty]), )).replace('>>', '> >')
     return str(ty)
 
 
-def typeFromStr(name):
+def typeFromLib(name):
     if name is not None:
         if isinstance(name, tuple):
-            return tuple(typeFromStr(n) for n in name)
+            return Template('tuple', [typeFromLib(n) for n in name])
         m = re.match(r'([^<]+)<(.+)>$', name)
         if m:
-            return Template(m.group(1), [typeFromStr(m.group(2))])
+            return Template(m.group(1), [typeFromLib(m.group(2))])
     return name
 
 
@@ -73,7 +75,7 @@ class Template:
 
 def testToStr(expr):
     ty = expr.getType()
-    if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'list', 'stack', 'queue', 'priority_queue', 'set', 'multiset']:
+    if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'list', 'stack', 'queue', 'priority_queue', 'fast_pque', 'xpque', 'set', 'multiset']:
         return '!%s.empty()' % (expr, )
     return str(expr)
 
@@ -109,23 +111,29 @@ class base_node:
 
     def visitExecBind(self):
         if hasattr(self, 'bindName') and self.bindStr is None:
-            self.bindStr = context.instantVar(self, self.bindName)
+            self.bindStr = context.nameInstant(self, self.bindName)
 
-    def visit(self, method, beforeMethod=None):
+    def visitUseBind(self):
+        if hasattr(self, 'bindStr') and self.bindStr is not None:
+            context.instantVar(self, self.bindStr)
+
+    def visit(self, method, beforeMethod=None, childrenMethods=None):
         if beforeMethod is not None and hasattr(self, beforeMethod):
             getattr(self, beforeMethod)()
-        for child in self.getChildNodes():
+        children = []
+        if childrenMethods is None:
+            childrenMethods = []
+        elif not isinstance(childrenMethods, list):
+            childrenMethods = [childrenMethods]
+        for childrenMethod in childrenMethods:
+            if hasattr(self, childrenMethod):
+                children = getattr(self, childrenMethod)()
+                break
+        else:
+            children = self.getChildNodes()
+        for child in children:
             if isinstance(child, base_node):
-                child.visit(method, beforeMethod)
-        if method is not None and hasattr(self, method):
-            getattr(self, method)()
-
-    def visitWithoutSuite(self, method, beforeMethod=None):
-        if beforeMethod is not None and hasattr(self, beforeMethod):
-            getattr(self, beforeMethod)()
-        for child in self.getChildNodesWithoutSuite() if hasattr(self, 'getChildNodesWithoutSuite') else self.getChildNodes():
-            if isinstance(child, base_node):
-                child.visitWithoutSuite(method, beforeMethod)
+                child.visit(method, beforeMethod, childrenMethods)
         if method is not None and hasattr(self, method):
             getattr(self, method)()
 
@@ -144,13 +152,17 @@ class base_node:
 def isComprehensionType(ty0, ty1):
     if ty1 is None or ty0 == ty1:
         return True
-    if isinstance(ty0, tuple) or isinstance(ty0, Template):
+    assert not isinstance(ty0, tuple)
+    assert not isinstance(ty1, tuple)
+    if isinstance(ty0, Template):
+        return True
+    if ty0 != 'auto' and ty1 == 'auto':
         return True
     if ty0 == 'double' and ty1 in ['double', 'float', 'int', 'short', 'char', 'bool']:
         return True
-    if ty0 in ['__int128', 'int128'] and ty1 in ['__int128', 'int128', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
+    if ty0 in ['__int128', 'int128'] and ty1 in ['__int128', 'int128', 'unsigned long long', 'uint64', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
         return True
-    if ty0 in ['long long', 'int64', 'size_t'] and ty1 in ['long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
+    if ty0 in ['unsigned long long', 'uint64', 'long long', 'int64', 'size_t'] and ty1 in ['unsigned long long', 'uint64', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
         return True
     if ty0 == 'int' and ty1 in ['int', 'short', 'char', 'bool']:
         return True
@@ -162,8 +174,10 @@ def isComprehensionType(ty0, ty1):
 
 
 def comprehensionType(ty0, ty1):
-    if isinstance(ty0, tuple) and isinstance(ty1, tuple) and len(ty0) == len(ty1):
-        return tuple(comprehensionType(u, v) for u, v in zip(ty0, ty1))
+    #if isinstance(ty0, tuple) and isinstance(ty1, tuple) and len(ty0) == len(ty1):
+    if isinstance(ty0, Template) and ty0.name == 'tuple' and isinstance(ty1, Template) and ty1.name == 'tuple' and len(ty0.args) == len(ty1.args):
+        return Template('tuple', [comprehensionType(u, v) for u, v in zip(ty0.args, ty1.args)])
+        #return tuple(comprehensionType(u, v) for u, v in zip(ty0, ty1))
     if isComprehensionType(ty0, ty1):
         return ty0
     elif isComprehensionType(ty1, ty0):
@@ -188,48 +202,53 @@ def hintType(name, ty0, ty1, op):
         TODO
 
 
-def toStrBoundArg(containerTy, args, upper_flag):
+def getMinMaxValueExpr(ty, upper_flag):
     LOWER = {
         'char': '-128',
         'short': '-32768',
         'int': '-2147483648',
         'long long': '-9223372036854775808LL',
+        'double': '-DBL_MAX',
     }
     UPPER = {
         'char': '127',
         'short': '32767',
         'int': '2147483647',
         'long long': '9223372036854775807LL',
+        'double': 'DBL_MAX',
     }
-    D = UPPER if upper_flag else LOWER
+    if str(ty) in ['double']:
+        context.appendInclude('cfloat')
+    return UPPER[str(ty)] if upper_flag else LOWER[str(ty)]
+
+def toStrBoundArg(containerTy, args, upper_flag):
     itemTy = itemType(containerTy)
-    tyArgValue = tuple(arg.getType() for arg in args)
-    if isinstance(itemTy, Template) and itemTy.name=='tuple':
-        itemTy = tuple(itemTy.args)
-    if not isinstance(itemTy, tuple):
+    while len(args) == 1 and isinstance(args[0], tuple_node) and args[0].node_type == 'tuple':
+        args = args[0].elements
+    tysArgs = tuple(arg.getType() for arg in args)
+    assert not isinstance(itemTy, tuple)
+    if not (isinstance(itemTy, Template) and itemTy.name == 'tuple'):
         assert len(args) <= 1
         return str(args[0]) if len(args) == 1 else D[itemTy]
-    if len(args) == 1 and tyArgValue[0] == itemTy:
+    if len(args) == 1 and tysArgs[0] == itemTy:
         return args[0]
-    if len(args) == 1 and not isinstance(args[0], tuple_node) and isinstance(tyArgValue[0], tuple):
+    if len(args) == 1 and isinstance(tysArgs[0], Template) and tysArgs[0].name == 'tuple':
         exprs = []
-        for i in range(len(itemTy)):
-            if i < len(tyArgValue):
+        for i in range(len(itemTy.args)):
+            if i < len(tysArgs[0].args):
                 exprs.append('get<%s>(%s)' % (i, args[0]))
             else:
-                exprs.append(D[itemTy[i]])
+                exprs.append(getMinMaxValueExpr(itemTy.args[i], upper_flag))
         return '%s(%s)' % (typeToStr(itemTy), ', '.join(exprs))
-    if len(args) == 1 and isinstance(args[0], tuple_node) and args[0].node_type == 'tuple':
-        args = args[0].elements
-        tyArgValue = tuple(arg.getType() for arg in args)
     exprs = []
-    for i in range(len(itemTy)):
-        if i < len(tyArgValue):
+    for i in range(len(itemTy.args)):
+        if i < len(tysArgs):
             exprs.append(str(args[i]))
         else:
-            exprs.append(D[itemTy[i]])
+            exprs.append(getMinMaxValueExpr(itemTy.args[i], upper_flag))
     return '%s(%s)' % (typeToStr(itemTy), ', '.join(exprs))
 
+use_profiler = False
 
 class Context:
 
@@ -278,25 +297,31 @@ class Context:
     def dedent(self):
         self._indent -= 1
 
-    def reserveLoop(self, slice, name=None):
+    def nameLoop(self, name):
         assert name is None or isinstance(name, str)
         self.instant_l_count += 1
         if name is None:
             name = '$%d' % (self.instant_l_count, )
         else:
             self.defineTemporaryDefinition(name, 'int')
-        self.instant.append(('loop', name, slice))
         return name
 
-    def instantVar(self, expr, name=None):
+    def reserveLoop(self, slice, name):
+        assert isinstance(name, str)
+        self.instant.append(('loop', name, slice))
+
+    def nameInstant(self, expr, name=None):
         assert name is None or isinstance(name, str)
         if name is None:
             self.instant_c_count += 1
             name = '$c%d' % (self.instant_c_count, )
         else:
             self.defineTemporaryDefinition(name, expr.getType())
-        self.instant.append(('instant', name, expr))
         return name
+
+    def instantVar(self, expr, name):
+        assert isinstance(name, str)
+        self.instant.append(('instant', name, expr))
 
     def getInstant(self):
         ret = self.instant
@@ -314,7 +339,7 @@ class Context:
         if self.parent is not None:
             return self.parent.getReturnType(name)
         if name in lib.func_definition:
-            return typeFromStr(lib.func_definition[name][0])
+            return typeFromLib(lib.func_definition[name][0])
         assert False, "function '%s' is not defined" % name
 
     def getMethodReturnType(self, ty, name):
@@ -473,7 +498,7 @@ def compress(src):
     nospace_chara = ',)]};*?{([=&:-+|<.'
     for line in src.split("\n"):
         pos = line.find('//')
-        if 0<=pos:
+        if 0 <= pos:
             line = line[:pos]
         if re.match(r'\s*\#', line):
             ret.append("\n")
@@ -505,7 +530,7 @@ def compress(src):
                 pre_word_is_quote = False
                 for word in token.split(' '):
                     if word:
-                        if pre_word_is_quote and word[0]=="'":
+                        if pre_word_is_quote and word[0] == "'":
                             words.append(' ')
                             line_char_count += 1
                         elif 250 <= line_char_count:
@@ -517,7 +542,7 @@ def compress(src):
                         words.append(word)
                         line_char_count += len(word)
                         prefix = '' if word[-1] in nospace_chara else ' '
-                        pre_word_is_quote = word[-1]=="'"
+                        pre_word_is_quote = word[-1] == "'"
                 tokens.append(''.join(words))
                 str_mode = True
                 line_char_count += 1
@@ -553,9 +578,13 @@ class group_node(base_node):
     def getChildNodes(self):
         return self.stmts
 
-    def start(self):
+    def start(self, profiler_flag):
         global context
+        global use_profiler
         context = Context()
+        use_profiler = profiler_flag
+        if use_profiler:
+            context.appendInclude('profiler.h')
         self.visit('visitInit')
         self.visit('visitSetParent')
         self.visit('visitRestruct')
@@ -573,8 +602,10 @@ class group_node(base_node):
         context.printBlank()
         self.visit('visitDefineFunc')
         context.printBlank()
-        context.print('int main() {')
+        context.print('int main(int mm$argc, const char * * mm$argv) {')
         context.indent()
+        context.appendInclude('init_params.h')
+        context.print('mm$initParams(mm$argc, mm$argv);')
         self.suite()
         context.print('return 0;')
         context.dedent()
@@ -649,6 +680,173 @@ class group_node(base_node):
         context.dedent()
         context.print('}')
 
+    def closeNest(self, nest_count):
+        for i in range(nest_count):
+            context.dedent()
+            context.print('}')
+
+    def processInstant(self, child=None):
+        instant = context.getInstant()
+        nest_count = 0
+        nest_flag = False
+        for kind, name, info in instant:
+            if kind == 'instant':
+                if not nest_flag:
+                    nest_flag = True
+                    nest_count += 1
+                    context.print('{')
+                    context.indent()
+                expr = info
+                if isinstance(expr, call_node) and expr.node_type == 'funccall' and str(expr.func) in ['min', 'max', 'sum', 'mean', 'median'] and len(expr.args) == 1:
+                    ty = expr.args[0].getType()
+                    init_value = '0'
+                    func_name = str(expr.func)
+                    if func_name == 'min':
+                        init_value = getMinMaxValueExpr(ty, True)
+                    elif func_name == 'max':
+                        init_value = getMinMaxValueExpr(ty, False)
+                    if func_name == 'median':
+                        context.print('std::vector<%s> %sc;' % (ty, name))
+                    elif func_name in ['sum', 'mean']:
+                        context.print('%s %s = %s;' % ('int' if ty == 'bool' else ty, name, init_value))
+                    else:
+                        context.print('%s %s = %s;' % (ty, name, init_value))
+                    if func_name == 'mean':
+                        context.print('int %s_cnt = 0;' % (name, ))
+                    expr.args[0].visit('visitUseBind', childrenMethods=['getChildNodesForBind', 'getChildNodesWithoutSuite'])
+                    nest_count2 = self.processInstant()
+                    if func_name == 'min':
+                        context.print('if(%s<%s) %s = %s;' % (expr.args[0], name, name, expr.args[0]))
+                    elif func_name == 'max':
+                        context.print('if(%s<%s) %s = %s;' % (name, expr.args[0], name, expr.args[0]))
+                    elif func_name == 'sum':
+                        context.print('%s += %s;' % (name, expr.args[0]))
+                    elif func_name == 'mean':
+                        context.print('{ %s += %s; ++%s_cnt; }' % (name, expr.args[0], name))
+                    elif func_name == 'median':
+                        context.print('%sc.push_back(%s);' % (name, expr.args[0]))
+                    self.closeNest(nest_count2)
+                    if func_name == 'mean':
+                        context.print('assert(%s_cnt);' % (name, ))
+                        context.print('%s /= %s_cnt;' % (name, name))
+                    elif func_name == 'median':
+                        context.print('assert(!%sc.empty());' % (name, ))
+                        context.appendInclude('algorithm')
+                        context.print('std::nth_element(%sc.begin(), %sc.begin() + (%sc.size()>>1), %sc.end());' % (name, name, name, name))
+                        context.print('%s %s = %sc[%sc.size()>>1];' % (ty, name, name, name))
+                        context.print('if(!(%sc.size()&1)) {' % (name, ))
+                        context.indent()
+                        context.print('%s += *std::max_element(%sc.begin(), %sc.begin() + (%sc.size()>>1));' % (name, name, name, name))
+                        context.print('%s /= 2;' % (name, ))
+                        context.dedent()
+                        context.print('}')
+                elif isinstance(expr, call_node) and expr.node_type == 'funccall' and str(expr.func) == 'move':
+                    context.print('auto %s = %s;' %
+                                    (name, expr.toStr()))
+                else:
+                    context.print('const auto & %s = %s;' %
+                                    (name, expr.toStr()))
+            elif kind == 'loop':
+                begin, end, diff, container = info
+                name = str(name)
+                if begin is None and diff is None and end is not None:
+                    ty = end.getType()
+                    if ty == 'string' or isinstance(ty, Template) and ty.name in ['vector', 'deque', 'list', 'set', 'multiset']:
+                        nest_flag = False
+                        context.print0(
+                            'for(auto & %s : %s) ' % (name, end))
+                        continue
+                resize_stmts = []
+                if child is not None and isinstance(child, op2_node) and child.node_type == 'assign':
+                    for i in range(len(child.args) - 2, 0, -2):
+                        if child.args[i] == '=' and (end is not None or container is not None):
+                            resize_stmts.extend(
+                                child.args[i - 1].printResize('%s.size()' % (container, ) if end is None else end, name))
+                if len(resize_stmts):
+                    if not nest_flag:
+                        nest_count += 1
+                        context.print('{')
+                        context.indent()
+                    for resize_stmt in resize_stmts:
+                        context.print('%s;' % (resize_stmt, ))
+                nest_flag = False
+                defs = {}
+                if begin is not None and type(begin) not in [node_var, node_ref, const_node]:
+                    defs['$b'] = str(begin)
+                    begin = '$b'
+                if end is not None and type(end) not in [node_var, node_ref, const_node]:
+                    defs['$e0'] = str(end)
+                    end = '$e0'
+                if diff is None:
+                    diff = '1'
+                sign = False
+                while isinstance(diff, pre_op1_node) and diff.node_type in ['pre_plus', 'pre_minus']:
+                    sign = sign if diff.node_type == 'pre_plus' else not sign
+                    diff = diff.child_node
+                sign = '-' if sign else '+'
+                if str(diff) == '1':
+                    diff = '%s%s%s' % (sign, sign, name)
+                elif type(diff) not in [node_var, node_ref, const_node]:
+                    diff = '%s%s=%s' % (name, sign, diff)
+                else:
+                    defs['$d'] = '-%s' % (diff,
+                                            ) if sign == '-' else str(diff)
+                    diff = '%s+=$d' % (name, )
+                    sign = None
+                if begin is not None:
+                    if container is not None:
+                        begin = '(0<=%s ? %s : (int)%s.size()+%s)' % (begin,
+                                                                        begin, container, begin)
+                elif sign == '+':
+                    begin = '0'
+                elif sign == '-':
+                    assert container is not None
+                    begin = '(int)%s.size()-1' % (container, )
+                else:
+                    begin = '(0<=$d ? 0 : (int)%s.size()-1)'
+                if end is not None:
+                    if container is not None:
+                        end = '(0<=%s ? %s : (int)%s.size()+%s)' % (end,
+                                                                    end, container, end)
+                elif sign == '+':
+                    assert container is not None
+                    end = '(int)%s.size()' % (container, )
+                elif sign == '-':
+                    end = '-1'
+                else:
+                    end = '(0<=$d ? (int)%s.size() : -1)'
+                order = ['$b', '$e0', '$d', name, '$e']
+                if end == '$e0':
+                    defs['$e'] = defs['$e0']
+                    defs.pop('$e0')
+                    order = ['$e'] + order
+                else:
+                    defs['$e'] = str(end)
+                if begin == '$b':
+                    defs[name] = defs['$b']
+                    defs.pop('$b')
+                    order = [name] + order
+                else:
+                    defs[name] = str(begin)
+                def_str = ', '.join('%s=%s' % (k, defs.pop(k))
+                                    for k in order if k in defs)
+                #def_str = []
+                # for k in order:
+                #    if k in defs:
+                #        def_str.append('%s=%s' % (k, defs.pop(k)))
+                if sign == '+':
+                    context.print0('for(int %s; %s<$e; %s) ' %
+                                    (def_str, name, diff))
+                elif sign == '-':
+                    context.print0('for(int %s; $e<%s; %s) ' %
+                                    (def_str, name, diff))
+                else:
+                    context.print0('for(int %s; 0<=$d ? %s<$e : $e<%s; %s) ' % (
+                        def_str, name, name, diff))
+            else:
+                TODO
+        return nest_count
+
     def suite(self):
         context.enterTemporaryDefinition()
         for child in self.getChildNodes():
@@ -659,128 +857,16 @@ class group_node(base_node):
                 continue
             if isinstance(child, node_tuple) and child.node_type == 'tuple' and sum(not isinstance(e, node_varhint) for e in child.elements) == 0:
                 continue
+            if use_profiler:
+                context.print('MM$P(%s);' % (child.meta['line'], ))
             # ノードを訪れて、:と@と複数比較を展開する
-            child.visitWithoutSuite('visitReserveBind')
-            child.visitWithoutSuite('visitExecBind')
+            child.visit('visitReserveBind', childrenMethods='getChildNodesWithoutSuite')
+            child.visit('visitExecBind', childrenMethods='getChildNodesWithoutSuite')
+            child.visit('visitUseBind', childrenMethods=['getChildNodesForBind', 'getChildNodesWithoutSuite'])
             # :がある場合は、その数だけforを作る
             # @または複数比較がある場合は、{を出力してindent
             # @または複数比較がある場合は、一時変数計算を行う
-            instant = context.getInstant()
-            nest_count = 0
-            nest_flag = False
-            for kind, name, info in instant:
-                if kind == 'instant':
-                    if not nest_flag:
-                        nest_flag = True
-                        nest_count += 1
-                        context.print('{')
-                        context.indent()
-                    expr = info
-                    if isinstance(expr, call_node) and expr.node_type == 'funccall' and str(expr.func) == 'move':
-                        context.print('auto %s = %s;' %
-                                      (name, expr.toStr()))
-                    else:
-                        context.print('const auto & %s = %s;' %
-                                      (name, expr.toStr()))
-                elif kind == 'loop':
-                    begin, end, diff, container = info
-                    name = str(name)
-                    if begin is None and diff is None and end is not None:
-                        ty = end.getType()
-                        if ty == 'string' or isinstance(ty, Template) and ty.name in ['vector', 'deque', 'list', 'set', 'multiset']:
-                            nest_flag = False
-                            context.print0(
-                                'for(auto & %s : %s) ' % (name, end))
-                            continue
-                    resize_stmts = []
-                    if isinstance(child, op2_node) and child.node_type == 'assign':
-                        for i in range(len(child.args) - 2, 0, -2):
-                            if child.args[i] == '=' and (end is not None or container is not None):
-                                resize_stmts.extend(
-                                    child.args[i - 1].printResize('%s.size()' % (container, ) if end is None else end, name))
-                    if len(resize_stmts):
-                        if not nest_flag:
-                            nest_count += 1
-                            context.print('{')
-                            context.indent()
-                        for resize_stmt in resize_stmts:
-                            context.print('%s;' % (resize_stmt, ))
-                    nest_flag = False
-                    defs = {}
-                    if begin is not None and type(begin) not in [node_var, node_ref, const_node]:
-                        defs['$b'] = str(begin)
-                        begin = '$b'
-                    if end is not None and type(end) not in [node_var, node_ref, const_node]:
-                        defs['$e0'] = str(end)
-                        end = '$e0'
-                    if diff is None:
-                        diff = '1'
-                    sign = False
-                    while isinstance(diff, pre_op1_node) and diff.node_type in ['pre_plus', 'pre_minus']:
-                        sign = sign if diff.node_type == 'pre_plus' else not sign
-                        diff = diff.child_node
-                    sign = '-' if sign else '+'
-                    if str(diff) == '1':
-                        diff = '%s%s%s' % (sign, sign, name)
-                    elif type(diff) not in [node_var, node_ref, const_node]:
-                        diff = '%s%s=%s' % (name, sign, diff)
-                    else:
-                        defs['$d'] = '-%s' % (diff,
-                                              ) if sign == '-' else str(diff)
-                        diff = '%s+=$d' % (name, )
-                        sign = None
-                    if begin is not None:
-                        if container is not None:
-                            begin = '(0<=%s ? %s : (int)%s.size()+%s)' % (begin,
-                                                                          begin, container, begin)
-                    elif sign == '+':
-                        begin = '0'
-                    elif sign == '-':
-                        assert container is not None
-                        begin = '(int)%s.size()-1' % (container, )
-                    else:
-                        begin = '(0<=$d ? 0 : (int)%s.size()-1)'
-                    if end is not None:
-                        if container is not None:
-                            end = '(0<=%s ? %s : (int)%s.size()+%s)' % (end,
-                                                                        end, container, end)
-                    elif sign == '+':
-                        assert container is not None
-                        end = '(int)%s.size()' % (container, )
-                    elif sign == '-':
-                        end = '-1'
-                    else:
-                        end = '(0<=$d ? (int)%s.size() : -1)'
-                    order = ['$b', '$e0', '$d', name, '$e']
-                    if end == '$e0':
-                        defs['$e'] = defs['$e0']
-                        defs.pop('$e0')
-                        order = ['$e'] + order
-                    else:
-                        defs['$e'] = str(end)
-                    if begin == '$b':
-                        defs[name] = defs['$b']
-                        defs.pop('$b')
-                        order = [name] + order
-                    else:
-                        defs[name] = str(begin)
-                    def_str = ', '.join('%s=%s' % (k, defs.pop(k))
-                                        for k in order if k in defs)
-                    #def_str = []
-                    # for k in order:
-                    #    if k in defs:
-                    #        def_str.append('%s=%s' % (k, defs.pop(k)))
-                    if sign == '+':
-                        context.print0('for(int %s; %s<$e; %s) ' %
-                                       (def_str, name, diff))
-                    elif sign == '-':
-                        context.print0('for(int %s; $e<%s; %s) ' %
-                                       (def_str, name, diff))
-                    else:
-                        context.print0('for(int %s; 0<=$d ? %s<$e : $e<%s; %s) ' % (
-                            def_str, name, name, diff))
-                else:
-                    TODO
+            nest_count = self.processInstant(child=child)
             done = False
             if isinstance(child, node_if_stmt):
                 context.print('if(%s) {' % (testToStr(child.if_data[0]), ))
@@ -806,7 +892,7 @@ class group_node(base_node):
                 expr = child.container
                 ty = expr.getType()
                 temporary = child.temporary
-                if ty in ['long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
+                if ty in ['unsigned long long', 'uint64', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
                     temporary, minus_flag = expand_minus(temporary)
                     assert isinstance(temporary, node_var)
                     if not minus_flag:
@@ -820,14 +906,14 @@ class group_node(base_node):
                     temporaries = []
                     temporary_is_tuple = isinstance(temporary, tuple_node) and temporary.node_type == 'tuple'
                     if temporary_is_tuple:
-                        if itemTy=='auto':
+                        if itemTy == 'auto':
                             for element in child.temporary.elements:
                                 element, minus_flag = expand_minus(element)
                                 assert isinstance(element, node_var)
                                 temporaries.append((element.name, 'auto', minus_flag))
                         else:
-                            assert isinstance(itemTy, tuple) or isinstance(itemTy, Template) and itemTy.name=='tuple'
-                            assert len(temporary.elements) == len(itemTy.args if isinstance(itemTy, Template) else itemTy)
+                            assert isinstance(itemTy, Template) and itemTy.name == 'tuple'
+                            assert len(temporary.elements) == len(itemTy.args)
                             for element, iTy in zip(child.temporary.elements, itemTy.args if isinstance(itemTy, Template) else itemTy):
                                 element, minus_flag = expand_minus(element)
                                 assert isinstance(element, node_var)
@@ -842,10 +928,12 @@ class group_node(base_node):
                             temporary = '$fr'
                     for name, iTy, minus_flag in temporaries:
                         context.defineTemporaryDefinition(name, iTy)
-                    if isinstance(ty, Template) and ty.name in ['stack', 'queue', 'priority_queue']:
+                    if isinstance(ty, Template) and ty.name in ['stack', 'queue', 'priority_queue', 'fast_pque', 'xpque']:
                         D = {
                             'queue': 'front',
                             'priority_queue': 'top',
+                            'fast_pque': 'top',
+                            'xpque': 'top',
                             'stack': 'top',
                         }
                         context.print0('while(!(%s).empty()) { %s %s = (%s).%s(); (%s).pop();' % (
@@ -907,9 +995,7 @@ class group_node(base_node):
                 context.print(str(child) + ';')
             # ノードの内容を出力する
             # @または複数比較がある場合は、dedentして}を出力
-            for i in range(nest_count):
-                context.dedent()
-                context.print('}')
+            self.closeNest(nest_count)
         context.leaveTemporaryDefinition()
 
 
@@ -988,6 +1074,8 @@ class node_funcdef(base_node):
         context.print('%s %s(%s) {' % ('void' if self.return_type is None else self.return_type,
                                        func_name, ', '.join(str(param) for param in self.parameters)))
         context.indent()
+        if use_profiler:
+            context.print('MM$P$Func MM$P$func;')
         for param in self.parameters:
             param.definesParam()
         self.suite.defines()
@@ -1017,20 +1105,16 @@ class node_funcdef(base_node):
                 context.print('vector<%s> %s$memo;' %
                               (self.return_type, self.name))
             else:
-                context.print('%s %s$memo;' % (typeToStr(Template('map', [tuple(
-                    param.ty for param in self.parameters), self.return_type])), self.name, ))
-            context.print('%s %s(%s) {' % ('void' if self.return_type is None else self.return_type,
-                                           self.name, ', '.join(str(param) for param in self.parameters)))
+                context.print('%s %s$memo;' % (typeToStr(Template('map', [Template('tuple', [param.ty for param in self.parameters]), self.return_type])), self.name, ))
+            context.print('%s %s(%s) {' % ('void' if self.return_type is None else self.return_type, self.name, ', '.join(str(param) for param in self.parameters)))
             context.indent()
             if size is not None:
                 context.print('if(%s$memo.empty()) {' % (self.name, ))
                 context.indent()
-                context.print('%s$memo.resize(%s, %s);' % (
-                    self.name, ' * '.join(toParenthesisStr(s) for s in size), toParenthesisStr(default_value)))
+                context.print('%s$memo.resize(%s, %s);' % (self.name, ' * '.join(toParenthesisStr(s) for s in size), toParenthesisStr(default_value)))
                 context.dedent()
                 context.print('}')
-                context.print('auto & ref = %s$memo[%s];' % (self.name, ' + '.join('%s%s' % (self.parameters[
-                              i].name, ''.join('*%s' % (s, ) for s in size[i + 1:])) for i in range(len(size)))))
+                context.print('auto & ref = %s$memo[%s];' % (self.name, ' + '.join('%s%s' % (self.parameters[i].name, ''.join('*%s' % (s, ) for s in size[i + 1:])) for i in range(len(size)))))
                 context.print('if(ref == %s) {' % (
                     toParenthesisStr(default_value), ))
                 context.indent()
@@ -1042,20 +1126,17 @@ class node_funcdef(base_node):
                 context.print('}')
                 context.print('return ref;')
             else:
-                context.print('auto it = %s$memo.find(%s(%s));' % (self.name, typeToStr(tuple(
-                    param.ty for param in self.parameters)), ', '.join(param.name for param in self.parameters)))
+                context.print('auto it = %s$memo.find(%s(%s));' % (self.name, typeToStr(Template('tuple', [param.ty for param in self.parameters])), ', '.join(param.name for param in self.parameters)))
                 context.print('if(it!=%s$memo.end()) {' % (self.name, ))
                 context.indent()
                 context.print('return it->second;')
                 context.dedent()
                 context.print('}')
                 if cycle is not None:
-                    context.print('%s$memo[%s(%s)] = %s;' % (self.name, typeToStr(tuple(
-                        param.ty for param in self.parameters)), ', '.join(param.name for param in self.parameters), cycle))
+                    context.print('%s$memo[%s(%s)] = %s;' % (self.name, typeToStr(Template('tuple', [param.ty for param in self.parameters])), ', '.join(param.name for param in self.parameters), cycle))
                 context.print('auto ret = %s$origin(%s);' % (
                     self.name, ', '.join(param.name for param in self.parameters)))
-                context.print('%s$memo[%s(%s)] = ret;' % (self.name, typeToStr(tuple(
-                    param.ty for param in self.parameters)), ', '.join(param.name for param in self.parameters)))
+                context.print('%s$memo[%s(%s)] = ret;' % (self.name, typeToStr(Template('tuple', [param.ty for param in self.parameters])), ', '.join(param.name for param in self.parameters)))
                 context.print('return ret;')
             context.dedent()
             context.print('}')
@@ -1071,7 +1152,7 @@ class node_funcdef(base_node):
                 if param.name == 'hash':
                     hash_ty = param.ty
             if hash_ty is not None:
-                if hash_ty in ['int64', 'uint64']:
+                if hash_ty in ['uint64', 'int64']:
                     context.appendInclude('fast_weak_set64.h')
                     context.print('fast_weak_set64<> %s$visited;' % (self.name, ))
                 else:
@@ -1114,6 +1195,8 @@ class node_funcdef(base_node):
             context.print('else {')
             context.indent()
             context.print('%s$lock = true;' % (self.name, ))
+            if hash_ty is not None:
+                context.print('%s$visited.clear();' % (self.name, ))
             context.print('%s$so.init((%s)+1, %s, %s);' % (self.name, maxdepth, timelimit, maxwidth))
             if verbose is not None:
                 context.print('%s$so.setVerbose(%s);' % (self.name, verbose))
@@ -1198,10 +1281,13 @@ class loop_node(base_node):
         restruct(self, node_varhint, self.meta, 'varhint', self.slice[0], self.slice[1])
 
     def visitExecBind(self):
+        self.bindStr = context.nameLoop(self.bindName)
+
+    def visitUseBind(self):
         slice = [i for i in self.slice] + [None]
         if isinstance(self.parent, call_node) and self.parent.node_type == 'getitem':
             slice[3] = self.parent.func
-        self.bindStr = context.reserveLoop(slice, self.bindName)
+        context.reserveLoop(slice, self.bindStr)
 
     def getType(self):
         if self.slice[0] is None and self.slice[2] is None and self.slice[1] is not None:
@@ -1419,7 +1505,7 @@ class node_typedparam(base_node):
         self.referenced = isinstance(ty, node_referencedtype)
         if self.referenced:
             ty = ty.ty
-        self.ty = 'int' if ty is None else (ty.getReturnType() if isinstance(ty, call_node) and ty.node_type=='template' else str(ty))
+        self.ty = 'int' if ty is None else (ty.getReturnType() if isinstance(ty, call_node) and ty.node_type == 'template' else str(ty))
 
     def toStr(self):
         return '%s%s%s' % (self.ty, ' & ' if self.referenced else ' ', self.name)
@@ -1455,11 +1541,13 @@ class call_node(base_node):
     def visitInclude(self):
         if self.node_type == 'funccall' and isinstance(self.func, node_getattr) and self.func.member in ['where', 'eq_to_end', 'eq_to_rend'] and 1 <= len(self.args):
             context.visitInclude('_slice')
+        if self.node_type == 'template':
+            context.visitTypeInclude(self.func.name)
 
     def toStr(self):
         if self.node_type == 'getitem':
             ty = self.func.getType()
-            if isinstance(ty, tuple) or isinstance(ty, Template) and ty.name=='tuple':
+            if isinstance(ty, Template) and ty.name == 'tuple':
                 assert len(self.args) == 1
                 return 'get<%s>(%s)' % (self.args[0], self.func)
             return '%s[%s]' % (self.func, ', '.join(str(arg) for arg in self.args))
@@ -1476,13 +1564,12 @@ class call_node(base_node):
                     return '({ auto ret = %s.back(); %s.pop_back(); ret; })' % (self.func.obj, self.func.obj, )
                 if self.func.member == 'shift' and ty.name == 'deque':
                     return '({ auto ret = %s.front(); %s.pop_front(); ret; })' % (self.func.obj, self.func.obj, )
-        if self.node_type == 'funccall' and isinstance(self.func, node_getattr) and self.func.member in ['lower_bound', 'upper_bound', 'bound', 'where', 'eq_to_end', 'eq_to_rend']:
+        if self.node_type == 'funccall' and isinstance(self.func, node_getattr) and self.func.member in ['lower_bound', 'upper_bound', 'bound', 'where', 'eq_to_end', 'eq_to_rend', 'min', 'max']:
             ty = self.func.obj.getType()
             if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'xvector']:
                 if self.func.member in ['lower_bound', 'upper_bound']:
                     if 1 <= len(self.args):
-                        args = toStrBoundArg(
-                            ty, self.args, self.func.member == 'upper_bound')
+                        args = toStrBoundArg(ty, self.args, self.func.member == 'upper_bound')
                         return '(int)(%s(%s.begin(), %s.end(), %s) - %s.begin())' % (self.func.member, self.func.obj, self.func.obj, args, self.func.obj)
                     else:
                         return '(int)%s.size()' % (self.func.member, ) if self.func.member == 'upper_bound' else '0'
@@ -1492,20 +1579,23 @@ class call_node(base_node):
                 if self.func.member == 'bound' and 1 <= len(self.args):
                     return 'range(lower_bound(%s.begin(), %s.end(), %s)-%s.begin(), upper_bound(%s.begin(), %s.end(), %s)-%s.begin())' % (
                         self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, False), self.func.obj, self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, True), self.func.obj)
-                if self.func.member=='eq_to_end':
+                if self.func.member == 'eq_to_end':
                     return '_slice(std::lower_bound(%s.begin(), %s.end(), %s), %s.end())' % (self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, False), self.func.obj)
-                if self.func.member=='eq_to_rend':
+                if self.func.member == 'eq_to_rend':
                     return '_slice((decltype(%s.rbegin()))std::upper_bound(%s.begin(), %s.end(), %s), %s.rend())' % (self.func.obj, self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, True), self.func.obj)
             if isinstance(ty, Template) and ty.name in ['set', 'multiset']:
-                if self.func.member=='where':
+                if self.func.member == 'where':
                     return '_slice(%s.lower_bound(%s), %s.upper_bound(%s))' % (self.func.obj, toStrBoundArg(ty, self.args, False), self.func.obj, toStrBoundArg(ty, self.args, True))
-                if self.func.member=='eq_to_end':
+                if self.func.member == 'eq_to_end':
                     return '_slice(%s.lower_bound(%s), %s.end())' % (self.func.obj, toStrBoundArg(ty, self.args, False), self.func.obj)
-                if self.func.member=='eq_to_rend':
+                if self.func.member == 'eq_to_rend':
                     return '_slice((decltype(%s.rbegin()))%s.upper_bound(%s), %s.rend())' % (self.func.obj, self.func.obj, toStrBoundArg(ty, self.args, True), self.func.obj)
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['int', 'int64', 'int128', 'float'] and len(self.args) == 1:
+                if self.func.member in ['min', 'max']:
+                    return ('*%s.begin()' if self.func.member == 'min' else '*%s.rbegin()') % (self.func.obj, )
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['int', 'int64', 'uint64', 'int128', 'float'] and len(self.args) == 1:
             D = {
                 'int': '(int)',
+                'uint64': '(unsigned long long)',
                 'int64': '(long long)',
                 'int128': '(__int128)',
                 'float': '(double)',
@@ -1515,10 +1605,6 @@ class call_node(base_node):
             if isinstance(self.parent, op2_node) and self.parent.node_type == 'assign' and self.parent.args[-1] == self:
                 return '%s(%s)' % (self.parent.args[-3].getType(), ', '.join(str(arg) for arg in self.args))
         if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max'] and len(self.args) != 0:
-            if len(self.args) == 1:
-                ty = self.args[0].getType()
-                if isinstance(ty, Template) and ty.name in ['set', 'multiset']:
-                    return ('*%s.begin()' if self.func.name == 'min' else '*%s.rbegin()') % (self.args[0], )
             assert 2 <= len(self.args)
             ty = None
             for arg in self.args:
@@ -1538,7 +1624,7 @@ class call_node(base_node):
 
     def getType(self):
         if self.node_type == 'funccall':
-            if isinstance(self.func, node_var) and self.func.name == 'move' and len(self.args) == 1:
+            if isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'mean', 'median', 'move'] and len(self.args) == 1:
                 return self.args[0].getType()
             if isinstance(self.func, node_getattr):
                 if self.func.member in ['where', 'eq_to_end', 'eq_to_rend']:
@@ -1555,10 +1641,7 @@ class call_node(base_node):
                 return ty.args[1]
             if ty == 'string':
                 return 'char'
-            if isinstance(ty, tuple):
-                assert isinstance(self.args[0], const_node)
-                return ty[int(self.args[0].toStr())]
-            if isinstance(ty, Template) and ty.name=='tuple':
+            if isinstance(ty, Template) and ty.name == 'tuple':
                 assert isinstance(self.args[0], const_node)
                 return ty.args[int(self.args[0].toStr())]
             return context.getMethodReturnType(ty, '__getitem__')
@@ -1568,6 +1651,7 @@ class call_node(base_node):
     def getReturnType(self):
         assert self.node_type == 'template'
         D = {
+            'uint64': 'unsigned long long',
             'int64': 'long long',
             'float': 'double',
         }
@@ -1606,6 +1690,12 @@ class call_node(base_node):
     def getChildNodes(self):
         return [self.func] + list(self.args)
 
+    def getChildNodesForBind(self):
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'mean', 'median'] and len(self.args) == 1:
+            return [self.func]
+        else:
+            return [self.func] + list(self.args)
+
     def visitReserveBind(self):
         if self.node_type == 'funccall' and isinstance(self.func, node_getattr):
             if self.func.member in ['bound', 'where']:
@@ -1614,6 +1704,10 @@ class call_node(base_node):
                 self.func.obj.reserveBind()
             elif self.func.member in ['eq_to_end', 'eq_to_rend']:
                 self.func.obj.reserveBind()
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'mean', 'median'] and len(self.args) == 1:
+            self.reserveBind()
+            if self.func.name in ['min', 'max']:
+                self.args[0].reserveBind()
 
     def printResize(self, size, name):
         if self.node_type == 'getitem' and len(self.args) == 1:
@@ -1652,7 +1746,7 @@ class node_getattr(base_node):
         ty = self.obj.getType()
 
         if self.member in ['pop', 'shift', 'top', 'back', 'front']:
-            if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'queue', 'priority_queue', 'stack'] and 1 <= len(ty.args):
+            if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'queue', 'priority_queue', 'fast_pque', 'xpque', 'stack'] and 1 <= len(ty.args):
                 return ty.args[0]
         if self.member in ['lower_bound', 'upper_bound']:
             return 'int'
@@ -1719,7 +1813,7 @@ class tuple_node(base_node):
             return Template('vector', [children_type])
         else:
             assert self.node_type == 'tuple'
-            return tuple(element.getType() for element in self.elements)
+            return Template('tuple', [element.getType() for element in self.elements])
 
     def defines(self):
         assert self.node_type == 'tuple'
@@ -1736,13 +1830,11 @@ class tuple_node(base_node):
         else:
             if isinstance(ty, base_node):
                 ty = ty.getType()
-            if isinstance(ty, Template) and ty.name=='tuple':
-                ty = tuple(ty.args)
-            if not isinstance(ty, tuple):
+            if not (isinstance(ty, Template) and ty.name == 'tuple'):
                 print('hintType', ty)
-            assert isinstance(ty, tuple)
-            assert len(ty) == len(self.elements)
-            for t, e in zip(ty, self.elements):
+            assert isinstance(ty, Template) and ty.name == 'tuple'
+            assert len(self.elements) == len(ty.args)
+            for e, t in zip(self.elements, ty.args):
                 e.hintType(t, op)
 
     def countMutate(self):
@@ -1824,9 +1916,9 @@ class op2_node(base_node):
         if self.node_type == 'comparison' and len(self.args) == 3 and self.args[1] in ['in', 'not in']:
             ty = self.args[2].getType()
             if isinstance(ty, Template) and ty.name in ['set', 'multiset']:
-                return '%s.find(%s)%s%s.end()' % (self.args[2], self.args[0], '==' if self.args[1]=='not in' else '!=', self.args[2])
+                return '%s.find(%s)%s%s.end()' % (self.args[2], self.args[0], '==' if self.args[1] == 'not in' else '!=', self.args[2])
             if isinstance(ty, Template) and ty.name in ['vector']:
-                return 'find(%s.begin(), %s.end(), %s)%s%s.end()' % (self.args[2], self.args[2], self.args[0], '==' if self.args[1]=='not in' else '!=', self.args[2])
+                return 'find(%s.begin(), %s.end(), %s)%s%s.end()' % (self.args[2], self.args[2], self.args[0], '==' if self.args[1] == 'not in' else '!=', self.args[2])
         ty = self.args[0].getType()
         if self.node_type == 'assign' and isinstance(ty, Template) and ty.name in ['set', 'multiset'] and self.args[1] in ['+=', '-=']:
             assert len(self.args) == 3

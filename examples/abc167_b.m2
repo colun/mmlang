@@ -1,3 +1,4 @@
+# atcoder: abc167_b
 A, B, C, K = inputInt(), inputInt(), inputInt(), inputInt()
 a = min(A, K)
 K -= a

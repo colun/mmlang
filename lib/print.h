@@ -72,3 +72,5 @@ template<class T>void print_unit(const std::vector<T> & val) {
 #define _GET_PRINT_MACRO_NAME(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, NAME, ...) NAME
 #define print(...) _GET_PRINT_MACRO_NAME(__VA_ARGS__, _print10, _print9, _print8, _print7, _print6, _print5, _print4, _print3, _print2, _print1, _print0)(__VA_ARGS__),fputc('\n', stdout)
 #define print0(...) _GET_PRINT_MACRO_NAME(__VA_ARGS__, _print10, _print9, _print8, _print7, _print6, _print5, _print4, _print3, _print2, _print1, _print0)(__VA_ARGS__)
+#define printF(...) _GET_PRINT_MACRO_NAME(__VA_ARGS__, _print10, _print9, _print8, _print7, _print6, _print5, _print4, _print3, _print2, _print1, _print0)(__VA_ARGS__),fputc('\n', stdout),fflush(stdout)
+#define print0F(...) _GET_PRINT_MACRO_NAME(__VA_ARGS__, _print10, _print9, _print8, _print7, _print6, _print5, _print4, _print3, _print2, _print1, _print0)(__VA_ARGS__),fflush(stdout)

@@ -1,3 +1,4 @@
+# atcoder: abc148_f
 N = inputInt()
 T[:N] = 0
 U = queue!(int)()

@@ -1,3 +1,4 @@
+# atcoder: abc177_b
 S = inputWord()
 T = inputWord()
 ret = T.size()

@@ -1,3 +1,4 @@
+# atcoder: abc167_a
 S = inputWord()
 T = inputWord()
 ret = True

@@ -1,3 +1,4 @@
+# atcoder: abc175_a
 S = inputWord()
 r = 0
 ret = 0

@@ -1,3 +1,4 @@
+# atcoder: abc170_c
 X, N = inputInt(), inputInt()
 p[:N] = inputInt()
 D[:110] = 0

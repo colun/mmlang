@@ -1,3 +1,4 @@
+# atcoder: abc168_a
 N = inputInt()
 if N % 10 in [2, 4, 5, 7, 9]:
     print("hon")

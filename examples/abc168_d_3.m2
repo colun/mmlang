@@ -1,3 +1,4 @@
+# atcoder: abc168_d
 N, M = inputInt(), inputInt()
 AB[:M] = inputInt() - 1, inputInt() - 1
 AB[M:M * 2] = AB[$1 - M][1], AB[$1 - M][0]

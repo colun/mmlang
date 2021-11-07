@@ -1,3 +1,4 @@
+# atcoder: abc175_b
 N = inputInt()
 L[:N] = inputInt()
 cnt = 0

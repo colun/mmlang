@@ -1,3 +1,4 @@
+# atcoder: abc174_e
 N, K = inputInt(), inputInt()
 A[:N] = inputInt()
 ans = 0

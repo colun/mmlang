@@ -1,3 +1,4 @@
+# atcoder: abc173_d
 N = inputInt()
 A[:N] = inputInt()
 A.rsort()

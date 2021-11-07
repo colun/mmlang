@@ -1,3 +1,4 @@
+# atcoder: abc173_c
 H = inputInt()
 W = inputInt()
 K = inputInt()
