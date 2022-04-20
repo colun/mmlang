@@ -1,4 +1,8 @@
 int MM$P$nowLine = -1;
+void MM$SignalHandler(int signum) {
+    fprintf(stderr, "ERROR: signal catch! signum=%d (mmlang line: %d)\n", signum, MM$P$nowLine);
+    exit(signum);
+}
 struct MM$Profiler {
     std::thread th;
     bool continue_flag;
@@ -6,6 +10,9 @@ struct MM$Profiler {
     std::map<int, int> counts;
     MM$Profiler() {
         fprintf(stderr, "Start, profiler!\n");
+        signal(SIGINT, MM$SignalHandler);
+        signal(SIGSEGV, MM$SignalHandler);
+        signal(SIGABRT, MM$SignalHandler);
         continue_flag = true;
         th = std::thread([&] {
             total_count = 0;

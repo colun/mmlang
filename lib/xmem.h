@@ -154,3 +154,13 @@ int xmem::buffer_size = 0;
 int xmem::redo_size = 0;
 std::vector<std::tuple<int, int> > xmem::locks;
 char xmem::buffer[262144];
+
+inline void xmem_lock() {
+    xmem::lock();
+}
+inline void xmem_unlock() {
+    xmem::unlock();
+}
+inline void xmem_undo() {
+    xmem::undo();
+}
