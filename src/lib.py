@@ -14,6 +14,7 @@ func_definition = {
     'mod': ('int', 'mod.h'),
     'mod_mul': ('int', 'mod_mul.h'),
     'int': ('int', None),
+    'short': ('short', None),
     'char': ('char', None),
     'uint64': ('unsigned long long', None),
     'int64': ('long long', None),
@@ -68,6 +69,9 @@ func_definition = {
     'initParams': (None, 'init_params.h'),
     'countBit32': ('int', 'count_bit32.h'),
     'countBit64': ('int', 'count_bit64.h'),
+    'xmem_lock': (None, 'xmem.h'),
+    'xmem_unlock': (None, 'xmem.h'),
+    'xmem_undo': (None, 'xmem.h'),
 }
 dependency = {
     'input_c_line_or_word.h': ['cassert', 'cstdio', 'cstring'],
@@ -98,21 +102,23 @@ dependency = {
     'xmem.h': ['cassert', 'cstring', 'unlikely.h'],
     'xarray.h': ['cassert', 'xmem.h', 'fast_array.h', 'xref.h'],
     'xvector.h': ['cassert', 'iterator', 'algorithm', 'xmem.h', 'fast_array.h', 'xref.h', 'likely.h', 'unlikely.h'],
+    'xdeque.h': ['cassert', 'iterator', 'algorithm', 'xmem.h', 'fast_array.h', 'xref.h', 'likely.h', 'unlikely.h'],
     'xpque.h': ['cassert', 'xmem.h', 'fast_array.h'],
     'fast_pque.h': ['cassert', 'fast_array.h'],
-    'xbeam.h': ['get_time.h', 'fast_pool.h', 'dpque.h', 'xnodemem.h'],
+    'xbeam.h': ['get_time.h', 'fast_pool.h', 'dpque.h', 'xmem.h', 'xnodemem.h'],
     'lrand49.h': ['mrand49.h', 'asm_mul_hi.h'],
     'drand49.h': ['mrand49.h'],
     'mmrand49.h': ['mrand49.h'],
     'gv.h': ['cstdarg', 'cmath', 'get_time.h'],
     'logit.h': ['cmath'],
     'sigmoid.h': ['cmath'],
-    'profiler.h': ['cstdio', 'map', 'thread', 'get_cpu_clock.h'],
+    'profiler.h': ['cstdio', 'map', 'thread', 'get_cpu_clock.h', 'signal.h'],
     'param_int.h': ['string', 'init_params.h'],
     'param_float.h': ['string', 'init_params.h'],
     'param_str.h': ['string', 'init_params.h'],
     'init_params.h': ['map', 'string'],
     'modint.h': ['mod_mul.h'],
+    'binary_file.h': ['cassert', 'cstdio', 'cstring'],
 }
 nocompress = set([
 ])
@@ -181,12 +187,21 @@ class_definition = {
         'empty': 'bool',
         '__getitem__': '$1',
     }, 'xvector.h'),
+    'xdeque': ({
+        'size': 'int',
+        'empty': 'bool',
+        'pop_back_with_value': '$1',
+        'pop_front_with_value': '$1',
+        '__getitem__': '$1',
+    }, 'xdeque.h'),
     'xpque': ({
         'size': 'int',
         '__getitem__': '$1',
         'top': '$1',
         'empty': 'bool',
     }, 'xpque.h'),
+    'xvar': ({
+    }, 'xvar.h'),
     'fast_pque': ({
         'size': 'int',
         '__getitem__': '$1',
@@ -222,4 +237,18 @@ class_definition = {
     }, 'BIT.h'),
     'modint': ({
     }, 'modint.h'),
+    'BinaryFile': ({
+        'open': 'bool',
+        'close': None,
+        'skip': None,
+        'seek': None,
+        'inputInt8': 'char',
+        'inputInt16': 'short',
+        'inputInt32': 'int',
+        'inputInt64': 'long long',
+        'inputInt': 'int',
+        'inputFloat32': 'float',
+        'inputFloat64': 'double',
+        'inputFloat': 'double',
+    }, 'binary_file.h'),
 }

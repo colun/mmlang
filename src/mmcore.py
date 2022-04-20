@@ -1,7 +1,7 @@
 import os
 import lib
 import re
-
+import mmbase
 
 SRC_DIR = os.path.dirname(__file__)
 ROOT_DIR = os.path.dirname(SRC_DIR)
@@ -113,11 +113,16 @@ class base_node:
         if hasattr(self, 'bindName') and self.bindStr is None:
             self.bindStr = context.nameInstant(self, self.bindName)
 
+    def isAggregateFunc(self):
+        return False
+
     def visitUseBind(self):
         if hasattr(self, 'bindStr') and self.bindStr is not None:
-            context.instantVar(self, self.bindStr)
+            def func():
+                context.instantVar(self, self.bindStr)
+            return 'aggregate' if self.isAggregateFunc() else 'instant', func
 
-    def visit(self, method, beforeMethod=None, childrenMethods=None):
+    def visit(self, method, beforeMethod=None, childrenMethods=None, reduce=None):
         if beforeMethod is not None and hasattr(self, beforeMethod):
             getattr(self, beforeMethod)()
         children = []
@@ -131,11 +136,15 @@ class base_node:
                 break
         else:
             children = self.getChildNodes()
+        rets = []
         for child in children:
             if isinstance(child, base_node):
-                child.visit(method, beforeMethod, childrenMethods)
+                rets.append(child.visit(method, beforeMethod, childrenMethods, reduce))
+        ret = None
         if method is not None and hasattr(self, method):
-            getattr(self, method)()
+            ret = getattr(self, method)()
+        if reduce is not None:
+            return reduce(ret, rets)
 
     def visitInit(self):
         self.parent = None
@@ -147,6 +156,9 @@ class base_node:
 
     def printResize(self, size, name):
         return []
+
+    def isConstExpr(self):
+        return False
 
 
 def isComprehensionType(ty0, ty1):
@@ -174,10 +186,10 @@ def isComprehensionType(ty0, ty1):
 
 
 def comprehensionType(ty0, ty1):
-    #if isinstance(ty0, tuple) and isinstance(ty1, tuple) and len(ty0) == len(ty1):
+    # if isinstance(ty0, tuple) and isinstance(ty1, tuple) and len(ty0) == len(ty1):
     if isinstance(ty0, Template) and ty0.name == 'tuple' and isinstance(ty1, Template) and ty1.name == 'tuple' and len(ty0.args) == len(ty1.args):
         return Template('tuple', [comprehensionType(u, v) for u, v in zip(ty0.args, ty1.args)])
-        #return tuple(comprehensionType(u, v) for u, v in zip(ty0, ty1))
+        # return tuple(comprehensionType(u, v) for u, v in zip(ty0, ty1))
     if isComprehensionType(ty0, ty1):
         return ty0
     elif isComprehensionType(ty1, ty0):
@@ -221,6 +233,7 @@ def getMinMaxValueExpr(ty, upper_flag):
         context.appendInclude('cfloat')
     return UPPER[str(ty)] if upper_flag else LOWER[str(ty)]
 
+
 def toStrBoundArg(containerTy, args, upper_flag):
     itemTy = itemType(containerTy)
     while len(args) == 1 and isinstance(args[0], tuple_node) and args[0].node_type == 'tuple':
@@ -248,28 +261,28 @@ def toStrBoundArg(containerTy, args, upper_flag):
             exprs.append(getMinMaxValueExpr(itemTy.args[i], upper_flag))
     return '%s(%s)' % (typeToStr(itemTy), ', '.join(exprs))
 
+
 use_profiler = False
 
-class Context:
 
-    def __init__(self, parent=None):
+class CodeContext:
+
+    def __init__(self):
         self._indent = 0
-        self.instant = []
-        self.instant_l_count = 0
-        self.instant_c_count = 0
         self.tabed = False
-        self.parent = parent
-        self.func_types = {}
-        self.definitions = {}
-        self.temporaryDefinitions = {}
-        self.removeBook = []
-        self.removeBookStack = []
-        self.used_includes = ['cassert', 'vector', 'deque', 'string', 'map', 'queue', 'stack', 'algorithm', 'type.h'] if parent is None else parent.used_includes
+
+        self.used_includes = ['cassert', 'vector', 'deque', 'string', 'map', 'queue', 'stack', 'algorithm', 'type.h']
         self.breaks = []
         self.breaks_used = []
         self.break_label_index = 0
         self.blanked = True
-        self.print_lines = [] if parent is None else parent.print_lines
+        self.print_lines = []
+
+    def getPrintLines(self):
+        return self.print_lines
+
+    def getUsedIncludes(self):
+        return self.used_includes
 
     def print0(self, text):
         if not self.tabed:
@@ -296,6 +309,95 @@ class Context:
 
     def dedent(self):
         self._indent -= 1
+
+    def appendInclude(self, inc, top=False):
+        if inc is None or inc in self.used_includes:
+            return
+        if inc in lib.dependency:
+            for inc2 in lib.dependency[inc]:
+                self.appendInclude(inc2)
+        if top:
+            self.used_includes.insert(0, inc)
+        else:
+            self.used_includes.append(inc)
+
+    def visitInclude(self, name):
+        if name in lib.func_definition:
+            self.appendInclude(lib.func_definition[name][1])
+
+    def visitTypeInclude(self, name):
+        if name in lib.class_definition:
+            self.appendInclude(lib.class_definition[name][1])
+
+    def get_break(self):
+        self.breaks_used[-1] += 1
+        return self.breaks[-1]
+
+    def get_continue(self):
+        return self.breaks[-1] + 'c'
+
+    def get_break_used(self):
+        return self.breaks_used[-1]
+
+    def push_break(self):
+        self.break_label_index += 1
+        ret = '$L%s' % (self.break_label_index, )
+        self.breaks.append(ret)
+        self.breaks_used.append(0)
+        return ret
+
+    def pop_break(self):
+        self.breaks.pop()
+        self.breaks_used.pop()
+
+
+class Context:
+
+    def __init__(self, parent=None, bigScope=True):
+        self.code_context = CodeContext() if parent is None else parent.code_context
+        self.is_main = (parent is None) if bigScope else parent.is_main
+        self.instant = []
+        self.instant_l_count = 0
+        self.instant_c_count = 0
+        self.parent = parent
+        self.bigScope = bigScope
+        self.func_types = {}
+        self.definitions = {}
+        self.temporaryDefinitions = {}
+        self.removeBook = []
+        self.removeBookStack = []
+        self.instant_symbols_stack = []
+        if parent is None:
+            self.symbols, self.cpp_symbols = mmbase.initSymbols()
+        else:
+            self.symbols, self.cpp_symbols = {}, set()
+
+    def getSymbol(self, name):
+        assert isinstance(name, str)
+        return name
+        for instant_symbols in self.instant_symbols_stack:
+            if name in instant_symbols:
+                return self.instant_symbols[name]
+        if name in self.symbols:
+            return self.symbols[name]
+        if self.parent is not None:
+            return self.parent.getSymbol(name)
+        assert False
+        return name
+
+    def generateCppName(self, name):
+        for i in range(1, 10000):
+            name2 = name if i==1 else f'{name}$${i}'
+            if name2 not in self.cpp_symbols:
+                self.cpp_symbols.add(name2)
+                return name2
+        else:
+            assert False
+
+    def getBigScope(self):
+        if self.bigScope:
+            return self
+        return self.parent.getBigScope()
 
     def nameLoop(self, name):
         assert name is None or isinstance(name, str)
@@ -331,6 +433,7 @@ class Context:
         return ret
 
     def declareFunc(self, name, ty):
+        #print('FUNC', name, ty)#TODO
         self.func_types[name] = ty
 
     def getReturnType(self, name):
@@ -348,6 +451,8 @@ class Context:
         else:
             assert isinstance(ty, str)
             ty_name = ty
+        if ty_name not in lib.class_definition:
+            print(context.definitions)
         method_dic = lib.class_definition[ty_name][0]
         ret_type = method_dic[name]
         m = re.match(r'\$(\d+)$', ret_type)
@@ -356,6 +461,16 @@ class Context:
             assert isinstance(ty, Template)
             ret_type = ty.args[n]
         return ret_type
+
+    def hasMethod(self, ty, name):
+        if isinstance(ty, Template):
+            ty_name = ty.name
+        else:
+            assert isinstance(ty, str)
+            ty_name = ty
+        if ty_name not in lib.class_definition:
+            return False
+        return name in lib.class_definition[ty_name][0]
 
     def isDefined(self, name):
         assert isinstance(name, str)
@@ -375,37 +490,60 @@ class Context:
     def definesParam(self, name, ty):
         assert isinstance(name, str)
         assert name not in self.definitions
-        self.definitions[name] = [ty, 1, True, False]
+        self.definitions[name] = [ty, 1, 0, False, None]
+        self.symbols[name] = self.generateCppName(name)
 
     def defines(self, name):
         assert isinstance(name, str)
         if not self.isDefined(name):
-            self.definitions[name] = [None, 0, False, True]
+            self.definitions[name] = [None, 0, 1, True, None]
+            self.symbols[name] = self.generateCppName(name)
+
+    def definesFor(self, name):
+        assert isinstance(name, str)
+        assert name not in self.symbols
+        self.symbols[name] = self.generateCppName(name)
+
+    def definesWithoutHint(self, name):
+        assert isinstance(name, str)
+        if name in self.definitions:
+            print(name, self.definitions)
+            assert name not in self.definitions
+        self.definitions[name] = [None, 0, 1, True, None]
+        self.symbols[name] = self.generateCppName(name)
 
     def definesWithHint(self, name, ty):
         assert isinstance(name, str)
-        assert name not in self.definitions
-        self.definitions[name] = [ty, 0, False, False]
+        if name in self.definitions:
+            print(name, self.definitions)
+            assert name not in self.definitions
+        self.definitions[name] = [ty, 0, 1, False, None]
+        self.symbols[name] = self.generateCppName(name)
 
     def hintType(self, name, ty, op):
         if self.isDefined(name):
             dObj = self.getDefinition(name)
+            if dObj[4] is None:
+                dObj[4] = ty if isinstance(ty, base_node) else False
+            else:
+                dObj[4] = False
             if not dObj[3]:
                 return
-            ty0 = dObj[0].getType() if isinstance(dObj[0], base_node) else dObj[0]
             ty1 = ty.getType() if isinstance(ty, base_node) else ty
-            if op == '=' and ty0 is None:
-                dObj[0] = ty
-            else:
-                dObj[0] = hintType(name, ty0, ty1, op)
+            dObj[0] = hintType(name, dObj[0], ty1, op)
 
     def countMutate(self, name):
         if self.isDefined(name):
             dObj = self.getDefinition(name)
             dObj[1] += 1
 
+    def setImmutable(self, name):
+        if self.isDefined(name):
+            dObj = self.getDefinition(name)
+            dObj[2] = 2
+
     def getDefinitions(self):
-        return [(key, self.definitions[key][0], self.definitions[key][1], self.definitions[key][2]) for key in self.definitions]
+        return [(key, self.definitions[key][0], self.definitions[key][1], self.definitions[key][2], self.definitions[key][4]) for key in self.definitions]
 
     def defineTemporaryDefinition(self, name, ty):
         if name not in self.temporaryDefinitions:
@@ -426,6 +564,17 @@ class Context:
         for name in self.removeBook:
             self.temporaryDefinitions[name].pop()
         self.removeBook = []
+        self.instant_symbols_stack = []
+
+    def pushInstantSymbols(self):
+        self.instant_symbols_stack.append({})
+
+    def popInstantSymbols(self):
+        self.instant_symbols_stack.pop()
+
+    def registerInstantSymbol(self, name, info):
+        assert name not in self.instant_symbols_stack[-1]
+        self.instant_symbols_stack[-1][name] = info
 
     def getType(self, name):
         if name in self.temporaryDefinitions and 1 <= len(self.temporaryDefinitions[name]):
@@ -443,42 +592,50 @@ class Context:
         return 'int'
         assert False
 
-    def appendInclude(self, inc):
-        if inc is None or inc in self.used_includes:
-            return
-        if inc in lib.dependency:
-            for inc2 in lib.dependency[inc]:
-                self.appendInclude(inc2)
-        self.used_includes.append(inc)
+    def getPrintLines(self, *args, **kargs):
+        return self.code_context.getPrintLines(*args, **kargs)
 
-    def visitInclude(self, name):
-        if name in lib.func_definition:
-            self.appendInclude(lib.func_definition[name][1])
+    def getUsedIncludes(self, *args, **kargs):
+        return self.code_context.getUsedIncludes(*args, **kargs)
 
-    def visitTypeInclude(self, name):
-        if name in lib.class_definition:
-            self.appendInclude(lib.class_definition[name][1])
+    def print0(self, *args, **kargs):
+        return self.code_context.print0(*args, **kargs)
 
-    def get_break(self):
-        self.breaks_used[-1] += 1
-        return self.breaks[-1]
+    def print(self, *args, **kargs):
+        return self.code_context.print(*args, **kargs)
 
-    def get_continue(self):
-        return self.breaks[-1] + 'c'
+    def printBlank(self, *args, **kargs):
+        return self.code_context.printBlank(*args, **kargs)
 
-    def get_break_used(self):
-        return self.breaks_used[-1]
+    def indent(self, *args, **kargs):
+        return self.code_context.indent(*args, **kargs)
 
-    def push_break(self):
-        self.break_label_index += 1
-        ret = '$L%s' % (self.break_label_index, )
-        self.breaks.append(ret)
-        self.breaks_used.append(0)
-        return ret
+    def dedent(self, *args, **kargs):
+        return self.code_context.dedent(*args, **kargs)
 
-    def pop_break(self):
-        self.breaks.pop()
-        self.breaks_used.pop()
+    def appendInclude(self, *args, **kargs):
+        return self.code_context.appendInclude(*args, **kargs)
+
+    def visitInclude(self, *args, **kargs):
+        return self.code_context.visitInclude(*args, **kargs)
+
+    def visitTypeInclude(self, *args, **kargs):
+        return self.code_context.visitTypeInclude(*args, **kargs)
+
+    def get_break(self, *args, **kargs):
+        return self.code_context.get_break(*args, **kargs)
+
+    def get_continue(self, *args, **kargs):
+        return self.code_context.get_continue(*args, **kargs)
+
+    def get_break_used(self, *args, **kargs):
+        return self.code_context.get_break_used(*args, **kargs)
+
+    def push_break(self, *args, **kargs):
+        return self.code_context.push_break(*args, **kargs)
+
+    def pop_break(self, *args, **kargs):
+        return self.code_context.pop_break(*args, **kargs)
 
 
 context = None
@@ -559,6 +716,43 @@ class node_multi_stmt(base_node):
         self.stmts = stmts
 
 
+def visitTopologicalUseBind(node):
+    def reduce(main, subs):
+        rets = []
+        for sub in subs:
+            sub_m, sub_children = sub
+            if sub_m is None:
+                rets.extend(sub_children)
+            else:
+                rets.append(sub)
+        return (main, rets)
+
+    def visit(obj):
+        posts = []
+        for sub in obj[1]:
+            ret = visit(sub)
+            if ret:
+                posts.append(ret)
+        if 1 <= len(posts) or obj[0] is not None and obj[0][0] == 'aggregate':
+            return (obj[0], posts)
+        elif obj[0] is not None:
+            obj[0][1]()
+        return False
+
+    def visit2(obj):
+        for sub in obj[1]:
+            visit2(sub)
+        if obj[0] is not None:
+            obj[0][1]()
+    ret = node.visit('visitUseBind', childrenMethods=['getChildNodesForBind', 'getChildNodesWithoutSuite'], reduce=reduce)
+    ret = visit(ret)
+    if ret:
+        visit2(ret)
+
+
+constexpr_types = ['bool', 'char', 'short', 'int', 'long long', 'double']
+
+
 class group_node(base_node):
 
     def __init__(self, meta, node_type, *stmts):
@@ -578,10 +772,23 @@ class group_node(base_node):
     def getChildNodes(self):
         return self.stmts
 
+    def printDefines(self):
+        global context
+        preContext = context
+        context = self.context
+        for name, ty, count, param_flag, node in context.getDefinitions():
+            if isinstance(node, base_node) and count == 1 and node.isConstExpr() and typeToStr(ty) in constexpr_types:
+                context.print('constexpr %s %s = %s;' % (typeToStr(ty), name, node))
+                context.setImmutable(name)
+                continue
+            if param_flag == 1:
+                context.print('%s %s;' % (typeToStr(ty), name))
+        context = preContext
+
     def start(self, profiler_flag):
         global context
         global use_profiler
-        context = Context()
+        context = Context(bigScope=True)
         use_profiler = profiler_flag
         if use_profiler:
             context.appendInclude('profiler.h')
@@ -590,15 +797,12 @@ class group_node(base_node):
         self.visit('visitRestruct')
         self.visit('visitInclude')
         assert self.node_type == 'start'
-        self.visit('visitDeclare')
-        context.printBlank()
         self.defines()
+        self.visit('visitDeclare')
         self.redefines()
-        for name, ty, count, param_flag in context.getDefinitions():
-            if isinstance(ty, base_node):
-                ty = ty.getType()
-            if not param_flag:
-                context.print('%s %s;' % (typeToStr(ty), name))
+        self.printDefines()
+        context.printBlank()
+        self.visit('visitDeclare2')
         context.printBlank()
         self.visit('visitDefineFunc')
         context.printBlank()
@@ -610,7 +814,7 @@ class group_node(base_node):
         context.print('return 0;')
         context.dedent()
         context.print('}')
-        for inc in context.used_includes:
+        for inc in context.getUsedIncludes():
             if not os.path.exists('%s/%s' % (LIB_DIR, inc)):
                 print('#include <%s>' % (inc, ))
         print()
@@ -619,7 +823,7 @@ class group_node(base_node):
         print('// library code :')
         print()
         src_list = []
-        for inc in context.used_includes:
+        for inc in context.getUsedIncludes():
             if os.path.exists('%s/%s' % (LIB_DIR, inc)):
                 src = open('%s/%s' % (LIB_DIR, inc)).read().rstrip() + "\n"
                 if inc in lib.nocompress:
@@ -635,29 +839,64 @@ class group_node(base_node):
         print()
         print('// generated code ( by mmlang ... https://github.com/colun/mmlang ) :')
         print()
-        print(''.join(context.print_lines), end='')
+        print(''.join(context.getPrintLines()), end='')
         context = None
 
     def defines(self):
+        global context
+        self.context = context
         for child in self.getChildNodes():
-            if isinstance(child, node_if_stmt) or isinstance(child, node_for_stmt) or isinstance(child, node_while_stmt):
+            if isinstance(child, node_if_stmt) or isinstance(child, node_while_stmt):
+                for condition in child.getChildNodesWithoutSuite():
+                    condition.visit('visitBindSymbol')
                 for suite in child.getSuiteChildNodes():
+                    parentContext = context
+                    context = Context(parentContext, bigScope=False)
                     suite.defines()
+                    context = parentContext
+            elif isinstance(child, node_for_stmt):
+                child.container.visit('visitBindSymbol')
+                parentContext = context
+                context = Context(parentContext, bigScope=False)
+                child.temporary.definesFor()
+                child.suite.defines()
+                if child.else_suite is not None:
+                    context = Context(parentContext, bigScope=False)
+                    child.else_suite.defines()
+                context = parentContext
+            elif isinstance(child, node_funcdef):
+                child.visit('visitBindSymbol', childrenMethods='getChildNodesWithoutSuite')
+                parentContext = context
+                context = Context(parentContext, bigScope=True)
+                child.defines()
+                context = parentContext
             elif isinstance(child, op2_node) and child.node_type == 'assign':
                 # 値の代入を確認（スコープの確認！）
                 args_len = (len(child.args) - 1) // 2
+                if child.mod:
+                    child.mod.visit('visitBindSymbol')
+                child.args[-1].visit('visitBindSymbol')
                 for i in range(args_len - 1, -1, -1):
                     child.args[i * 2].defines()
             elif isinstance(child, node_varhint):
                 child.defines()
-            elif (isinstance(child, pre_op1_node) or isinstance(child, post_op1_node)) and child.node_type in ['pre_inc', 'pre_dec', 'post_inc', 'post_dec']:
-                child.child_node.defines()
+            elif isinstance(child, node_tuple) and child.node_type == 'tuple' and sum(not isinstance(e, node_varhint) for e in child.elements) == 0:
+                for child2 in child.elements:
+                    assert isinstance(child2, node_varhint)
+                    child2.defines()
+            else:
+                child.visit('visitBindSymbol')
 
     def redefines(self):
+        global context
+        parentContext = context
+        context = self.context
         for child in self.getChildNodes():
             if isinstance(child, node_if_stmt) or isinstance(child, node_for_stmt) or isinstance(child, node_while_stmt) or isinstance(child, node_funcdef):
                 for suite in child.getSuiteChildNodes():
                     suite.redefines()
+            elif isinstance(child, node_funcdef):
+                child.suite.redefines()
             elif isinstance(child, op2_node) and child.node_type == 'assign':
                 # 値の再代入を確認（+=や*=なども含めて）（型に対してやや緩やかになるため）
                 args_len = (len(child.args) - 1) // 2
@@ -669,9 +908,8 @@ class group_node(base_node):
                             flag = False
                     child.args[i * 2].countMutate()
             elif (isinstance(child, pre_op1_node) or isinstance(child, post_op1_node)) and child.node_type in ['pre_inc', 'pre_dec', 'post_inc', 'post_dec']:
-                child.child_node.hintType(
-                    'int', '-=' if child.op == '--' else '+=')
                 child.child_node.countMutate()
+        context = parentContext
 
     def printContinueLabel(self, label):
         context.print('if(false) {')
@@ -697,7 +935,7 @@ class group_node(base_node):
                     context.print('{')
                     context.indent()
                 expr = info
-                if isinstance(expr, call_node) and expr.node_type == 'funccall' and str(expr.func) in ['min', 'max', 'sum', 'mean', 'median'] and len(expr.args) == 1:
+                if expr.isAggregateFunc():
                     ty = expr.args[0].getType()
                     init_value = '0'
                     func_name = str(expr.func)
@@ -705,49 +943,56 @@ class group_node(base_node):
                         init_value = getMinMaxValueExpr(ty, True)
                     elif func_name == 'max':
                         init_value = getMinMaxValueExpr(ty, False)
+                    context.registerInstantSymbol(name, name)
                     if func_name == 'median':
-                        context.print('std::vector<%s> %sc;' % (ty, name))
+                        context.print('std::vector<%s> %s$c;' % (ty, name))
+                    elif func_name == 'count':
+                        context.print('int %s = 0;' % (name, ))
                     elif func_name in ['sum', 'mean']:
                         context.print('%s %s = %s;' % ('int' if ty == 'bool' else ty, name, init_value))
                     else:
                         context.print('%s %s = %s;' % (ty, name, init_value))
                     if func_name == 'mean':
-                        context.print('int %s_cnt = 0;' % (name, ))
-                    expr.args[0].visit('visitUseBind', childrenMethods=['getChildNodesForBind', 'getChildNodesWithoutSuite'])
+                        context.print('int %s$cnt = 0;' % (name, ))
+                    visitTopologicalUseBind(expr.args[0])
+                    context.pushInstantSymbols()
                     nest_count2 = self.processInstant()
                     if func_name == 'min':
                         context.print('if(%s<%s) %s = %s;' % (expr.args[0], name, name, expr.args[0]))
                     elif func_name == 'max':
                         context.print('if(%s<%s) %s = %s;' % (name, expr.args[0], name, expr.args[0]))
+                    elif func_name == 'count':
+                        context.print('if(%s) ++%s;' % (expr.args[0], name))
                     elif func_name == 'sum':
                         context.print('%s += %s;' % (name, expr.args[0]))
                     elif func_name == 'mean':
-                        context.print('{ %s += %s; ++%s_cnt; }' % (name, expr.args[0], name))
+                        context.print('{ %s += %s; ++%s$cnt; }' % (name, expr.args[0], name))
                     elif func_name == 'median':
-                        context.print('%sc.push_back(%s);' % (name, expr.args[0]))
+                        context.print('%s$c.push_back(%s);' % (name, expr.args[0]))
                     self.closeNest(nest_count2)
+                    context.popInstantSymbols()
                     if func_name == 'mean':
-                        context.print('assert(%s_cnt);' % (name, ))
-                        context.print('%s /= %s_cnt;' % (name, name))
+                        context.print('assert(%s$cnt);' % (name, ))
+                        context.print('%s /= %s$cnt;' % (name, name))
                     elif func_name == 'median':
-                        context.print('assert(!%sc.empty());' % (name, ))
+                        context.print('assert(!%s$c.empty());' % (name, ))
                         context.appendInclude('algorithm')
-                        context.print('std::nth_element(%sc.begin(), %sc.begin() + (%sc.size()>>1), %sc.end());' % (name, name, name, name))
-                        context.print('%s %s = %sc[%sc.size()>>1];' % (ty, name, name, name))
-                        context.print('if(!(%sc.size()&1)) {' % (name, ))
+                        context.print('std::nth_element(%s$c.begin(), %s$c.begin() + (%s$c.size()>>1), %s$c.end());' % (name, name, name, name))
+                        context.print('%s %s = %s$c[%s$c.size()>>1];' % (ty, name, name, name))
+                        context.print('if(!(%s$c.size()&1)) {' % (name, ))
                         context.indent()
-                        context.print('%s += *std::max_element(%sc.begin(), %sc.begin() + (%sc.size()>>1));' % (name, name, name, name))
+                        context.print('%s += *std::max_element(%s$c.begin(), %s$c.begin() + (%s$c.size()>>1));' % (name, name, name, name))
                         context.print('%s /= 2;' % (name, ))
                         context.dedent()
                         context.print('}')
                 elif isinstance(expr, call_node) and expr.node_type == 'funccall' and str(expr.func) == 'move':
                     context.print('auto %s = %s;' %
-                                    (name, expr.toStr()))
+                                  (name, expr.toStr()))
                 else:
                     context.print('const auto & %s = %s;' %
-                                    (name, expr.toStr()))
+                                  (name, expr.toStr()))
             elif kind == 'loop':
-                begin, end, diff, container = info
+                begin, end, diff, condition, container = info
                 name = str(name)
                 if begin is None and diff is None and end is not None:
                     ty = end.getType()
@@ -755,6 +1000,8 @@ class group_node(base_node):
                         nest_flag = False
                         context.print0(
                             'for(auto & %s : %s) ' % (name, end))
+                        if condition is not None:
+                            context.print0('if(%s) ' % (condition, ))
                         continue
                 resize_stmts = []
                 if child is not None and isinstance(child, op2_node) and child.node_type == 'assign':
@@ -790,13 +1037,13 @@ class group_node(base_node):
                     diff = '%s%s=%s' % (name, sign, diff)
                 else:
                     defs['$d'] = '-%s' % (diff,
-                                            ) if sign == '-' else str(diff)
+                                          ) if sign == '-' else str(diff)
                     diff = '%s+=$d' % (name, )
                     sign = None
                 if begin is not None:
                     if container is not None:
                         begin = '(0<=%s ? %s : (int)%s.size()+%s)' % (begin,
-                                                                        begin, container, begin)
+                                                                      begin, container, begin)
                 elif sign == '+':
                     begin = '0'
                 elif sign == '-':
@@ -836,18 +1083,28 @@ class group_node(base_node):
                 #        def_str.append('%s=%s' % (k, defs.pop(k)))
                 if sign == '+':
                     context.print0('for(int %s; %s<$e; %s) ' %
-                                    (def_str, name, diff))
+                                   (def_str, name, diff))
                 elif sign == '-':
                     context.print0('for(int %s; $e<%s; %s) ' %
-                                    (def_str, name, diff))
+                                   (def_str, name, diff))
                 else:
                     context.print0('for(int %s; 0<=$d ? %s<$e : $e<%s; %s) ' % (
                         def_str, name, name, diff))
+                if condition is not None:
+                    context.print0('if(%s) ' % (condition, ))
+                context.registerInstantSymbol(name, name)
             else:
                 TODO
         return nest_count
 
+    def suiteWithDefines(self):
+        self.printDefines()
+        self.suite()
+
     def suite(self):
+        global context
+        preContext = context
+        context = self.context
         context.enterTemporaryDefinition()
         for child in self.getChildNodes():
             context.releaseTemporaryDefinition()
@@ -862,29 +1119,30 @@ class group_node(base_node):
             # ノードを訪れて、:と@と複数比較を展開する
             child.visit('visitReserveBind', childrenMethods='getChildNodesWithoutSuite')
             child.visit('visitExecBind', childrenMethods='getChildNodesWithoutSuite')
-            child.visit('visitUseBind', childrenMethods=['getChildNodesForBind', 'getChildNodesWithoutSuite'])
+            visitTopologicalUseBind(child)
             # :がある場合は、その数だけforを作る
             # @または複数比較がある場合は、{を出力してindent
             # @または複数比較がある場合は、一時変数計算を行う
+            context.pushInstantSymbols()
             nest_count = self.processInstant(child=child)
             done = False
             if isinstance(child, node_if_stmt):
                 context.print('if(%s) {' % (testToStr(child.if_data[0]), ))
                 context.indent()
-                child.if_data[1].suite()
+                child.if_data[1].suiteWithDefines()
                 context.dedent()
                 context.print('}')
                 for elif_row in child.elif_data:
                     context.print('else if(%s) {' % (
                         testToStr(elif_row[0]), ))
                     context.indent()
-                    elif_row[1].suite()
+                    elif_row[1].suiteWithDefines()
                     context.dedent()
                     context.print('}')
                 if child.else_suite is not None:
                     context.print('else {')
                     context.indent()
-                    child.else_suite.suite()
+                    child.else_suite.suiteWithDefines()
                     context.dedent()
                     context.print('}')
                 done = True
@@ -894,7 +1152,7 @@ class group_node(base_node):
                 temporary = child.temporary
                 if ty in ['unsigned long long', 'uint64', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
                     temporary, minus_flag = expand_minus(temporary)
-                    assert isinstance(temporary, node_var)
+                    assert isinstance(temporary, node_var), 'コンテナではなく整数値で暗黙のforを回すのに、ループ変数が単独変数ではありません'
                     if not minus_flag:
                         context.print('for(int %s=0; %s<%s; ++%s) {' % (temporary, temporary, expr, temporary))
                     else:
@@ -956,7 +1214,7 @@ class group_node(base_node):
                 context.indent()
                 label = context.push_break()
                 self.printContinueLabel(label)
-                child.suite.suite()
+                child.suite.suiteWithDefines()
                 if context.get_break_used() == 0:
                     label = None
                 context.pop_break()
@@ -965,7 +1223,7 @@ class group_node(base_node):
                 if child.else_suite is not None:
                     context.print('{')
                     context.indent()
-                    child.else_suite.suite()
+                    child.else_suite.suiteWithDefines()
                     context.dedent()
                     context.print('}')
                 if label is not None:
@@ -976,7 +1234,7 @@ class group_node(base_node):
                 context.indent()
                 label = context.push_break()
                 self.printContinueLabel(label)
-                child.suite.suite()
+                child.suite.suiteWithDefines()
                 if context.get_break_used() == 0:
                     label = None
                 context.pop_break()
@@ -985,18 +1243,22 @@ class group_node(base_node):
                 if child.else_suite is not None:
                     context.print('{')
                     context.indent()
-                    child.else_suite.suite()
+                    child.else_suite.suiteWithDefines()
                     context.dedent()
                     context.print('}')
                 if label is not None:
                     context.print('%s:;' % (label, ))
                 done = True
             if not done:
-                context.print(str(child) + ';')
+                code = str(child)
+                if 1 <= len(code):
+                    context.print(code + ';')
             # ノードの内容を出力する
             # @または複数比較がある場合は、dedentして}を出力
             self.closeNest(nest_count)
+            context.popInstantSymbols()
         context.leaveTemporaryDefinition()
+        context = preContext
 
 
 node_start = group_node
@@ -1028,19 +1290,28 @@ class node_funcdef(base_node):
     def toStr(self):
         TODO
 
-    def getChildNodes(self):
+    def defines(self):
+        for param in self.parameters:
+            param.defines()
+        self.suite.defines()
+
+    def getChildNodesWithoutSuite(self):
         ret = self.decorators + list(self.parameters)
         if self.return_type is not None:
             ret += [self.return_type]
-        ret += [self.suite]
         return ret
 
     def getSuiteChildNodes(self):
         return [self.suite]
 
+    def getChildNodes(self):
+        return self.getChildNodesWithoutSuite() + self.getSuiteChildNodes()
+
     def visitDeclare(self):
         context.declareFunc(
             self.name, None if self.return_type is None else str(self.return_type))
+
+    def visitDeclare2(self):
         context.print('%s %s(%s);' % ('void' if self.return_type is None else self.return_type,
                                       self.name, ', '.join(str(param) for param in self.parameters)))
 
@@ -1060,31 +1331,32 @@ class node_funcdef(base_node):
     def visitDefineFunc(self):
         global context
         parentContext = context
-        context = Context(parentContext)
+        context = self.suite.context
 
         func_name = self.name
         decorators = self.getDecorators()
         memo = decorators.get('memo', None)
         beam = decorators.get('beam', None)
-        if memo is not None or beam is not None:
+        sa_dac = decorators.get('sa_dac', None)
+        xheu_type = None
+        xheu = None
+        if beam is not None:
+            xheu, xheu_type = beam, 'beam'
+        elif sa_dac is not None:
+            xheu, xheu_type = sa_dac, 'sa_dac'
+        if memo is not None or xheu is not None:
             func_name = '%s$origin' % (self.name, )
-            if beam is not None:
+            if xheu_type == 'beam':
                 assert self.return_type is None
+            if xheu_type == 'sa_dac':
+                assert str(self.return_type) == 'float'
 
         context.print('%s %s(%s) {' % ('void' if self.return_type is None else self.return_type,
                                        func_name, ', '.join(str(param) for param in self.parameters)))
         context.indent()
         if use_profiler:
             context.print('MM$P$Func MM$P$func;')
-        for param in self.parameters:
-            param.definesParam()
-        self.suite.defines()
-        self.suite.redefines()
-        for name, ty, count, param_flag in context.getDefinitions():
-            if isinstance(ty, base_node):
-                ty = ty.getType()
-            if not param_flag:
-                context.print('%s %s;' % (typeToStr(ty), name))
+        self.suite.printDefines()
         self.suite.suite()
         context.dedent()
         context.print('}')
@@ -1140,13 +1412,17 @@ class node_funcdef(base_node):
                 context.print('return ret;')
             context.dedent()
             context.print('}')
-        if beam is not None:
-            maxdepth = beam[1].get('maxdepth', None)
-            maxwidth = beam[1].get('maxwidth', None)
-            timelimit = beam[1].get('timelimit', None)
-            verbose = beam[1].get('verbose', None)
-            context.appendInclude('xbeam.h')
-            context.print('xbeam %s$so;' % (self.name, ))
+        if xheu is not None:
+            maxdepth = xheu[1].get('maxdepth', None)
+            maxwidth = xheu[1].get('maxwidth', None)
+            timelimit = xheu[1].get('timelimit', None)
+            verbose = xheu[1].get('verbose', None)
+            if xheu_type == 'beam':
+                context.appendInclude('xbeam.h')
+                context.print('xbeam %s$so;' % (self.name, ))
+            elif xheu_type == 'sa_dac':
+                context.appendInclude('xsa_dac.h')
+                context.print('xsa_dac %s$so;' % (self.name, ))
             hash_ty = None
             for param in self.parameters:
                 if param.name == 'hash':
@@ -1166,9 +1442,10 @@ class node_funcdef(base_node):
                 'int': 'nextInt',
                 'int64': 'nextInt64',
                 'float': 'nextFloat',
+                'bool': 'nextBool',
             }
             for param in self.parameters:
-                context.print('auto %s = %s$so.%s();' % (param.name, self.name, paramTypeMethodDic[param.ty]))
+                context.print('auto %s = %s$so.%s();' % (param.name, self.name, paramTypeMethodDic[str(param.ty)]))
                 if param.name == 'hash':
                     context.print('if(%s$visited.testWithSet(hash)) continue;' % (self.name, ))
             context.print('%s$so.accept();' % (self.name, ))
@@ -1187,7 +1464,7 @@ class node_funcdef(base_node):
             context.print('if(%s$so.reserve(%s)) {' % (self.name, 'score' if 'score' in [param.name for param in self.parameters] else '0'))
             context.indent()
             for param in self.parameters:
-                context.print('%s$so.%s(%s);' % (self.name, paramTypeMethodDic[param.ty], param.name))
+                context.print('%s$so.%s(%s);' % (self.name, paramTypeMethodDic[str(param.ty)], param.name))
             context.dedent()
             context.print('}')
             context.dedent()
@@ -1203,7 +1480,7 @@ class node_funcdef(base_node):
             context.print('if(%s$so.reserve(%s)) {' % (self.name, 'score' if 'score' in [param.name for param in self.parameters] else '0'))
             context.indent()
             for param in self.parameters:
-                context.print('%s$so.%s(%s);' % (self.name, paramTypeMethodDic[param.ty], param.name))
+                context.print('%s$so.%s(%s);' % (self.name, paramTypeMethodDic[str(param.ty)], param.name))
             context.dedent()
             context.print('}')
             context.print('%s$loop();' % (self.name, ))
@@ -1230,7 +1507,10 @@ class node_varhint(base_node):
         return self.varname.toStr()
 
     def getChildNodes(self):
-        return [self.varname]
+        if self.typehint is not None:
+            return [self.varname, self.typehint]
+        else:
+            return [self.varname]
 
     def getReturnType(self):
         return self.varname.getReturnType()
@@ -1239,10 +1519,20 @@ class node_varhint(base_node):
         pass
 
     def defines(self):
-        context.definesWithHint(self.varname.name, self.typehint.getReturnType())
+        if self.typehint is not None:
+            self.typehint.visit('visitBindSymbol')
+            ty = self.typehint
+            if isinstance(ty, call_node) and ty.node_type == 'template':
+                ty = ty.getReturnType()
+            else:
+                ty = ty.name
+            context.definesWithHint(self.varname.name, ty)
+        else:
+            context.definesWithoutHint(self.varname.name)
+        self.varname.visit('visitBindSymbol')
 
     def hintType(self, ty, op):
-        pass
+        self.varname.hintType(ty, op)
 
     def countMutate(self):
         self.varname.countMutate()
@@ -1251,10 +1541,21 @@ class node_varhint(base_node):
         return self.varname.getType()
 
     def visitInclude(self):
-        ty = self.typehint.getReturnType()
-        if isinstance(ty, Template):
-            ty = ty.name
-        context.visitTypeInclude(ty)
+        if self.typehint is not None:
+            ty = self.typehint
+            if isinstance(ty, call_node) and ty.node_type == 'template':
+                ty = ty.getReturnType()
+            else:
+                ty = ty.name
+            while True:
+                if isinstance(ty, Template):
+                    context.visitTypeInclude(ty.name)
+                    if context.hasMethod(ty, '__getitem__'):
+                        ty = context.getMethodReturnType(ty, '__getitem__')
+                        continue
+                else:
+                    context.visitTypeInclude(ty)
+                break
 
 
 class loop_node(base_node):
@@ -1265,6 +1566,9 @@ class loop_node(base_node):
 
     def getChildNodes(self):
         return self.slice
+
+    def getChildNodesForBind(self):
+        return []
 
     def visitRestruct(self):
         target = self
@@ -1277,7 +1581,7 @@ class loop_node(base_node):
         if not isinstance(target.parent, group_node):
             return
         assert isinstance(self.slice[0], base_node)
-        assert isinstance(self.slice[1], base_node)
+        assert self.slice[1] is None or isinstance(self.slice[1], base_node)
         restruct(self, node_varhint, self.meta, 'varhint', self.slice[0], self.slice[1])
 
     def visitExecBind(self):
@@ -1286,8 +1590,11 @@ class loop_node(base_node):
     def visitUseBind(self):
         slice = [i for i in self.slice] + [None]
         if isinstance(self.parent, call_node) and self.parent.node_type == 'getitem':
-            slice[3] = self.parent.func
-        context.reserveLoop(slice, self.bindStr)
+            slice[4] = self.parent.func
+
+        def func():
+            context.reserveLoop(slice, self.bindStr)
+        return 'loop', func
 
     def getType(self):
         if self.slice[0] is None and self.slice[2] is None and self.slice[1] is not None:
@@ -1301,7 +1608,7 @@ def node_instant(meta, node_type, *args):
     whole_name = None
     name = None
     index = 0
-    slice = [None] * 3
+    slice = [None] * 4
     for arg in args:
         if arg == '@':
             assert slice[index] is not None
@@ -1313,7 +1620,7 @@ def node_instant(meta, node_type, *args):
                 name = slice[index].name
             slice[index] = None
         elif arg == ':':
-            assert index in [0, 1]
+            assert index in [0, 1, 2]
             assert name is None
             index += 1
         else:
@@ -1339,9 +1646,10 @@ class node_var(base_node):
         assert isinstance(name, str)
         self.meta = meta
         self.name = name
+        self.dest_variable = '__unknown__'
 
     def toStr(self):
-        return self.name
+        return str(self.dest_variable)
 
     def getChildNodes(self):
         return []
@@ -1366,6 +1674,11 @@ class node_var(base_node):
 
     def defines(self):
         context.defines(self.name)
+        self.visit('visitBindSymbol')
+
+    def definesFor(self):
+        context.definesFor(self.name)
+        self.visit('visitBindSymbol')
 
     def hintType(self, ty, op):
         context.hintType(self.name, ty, op)
@@ -1379,21 +1692,28 @@ class node_var(base_node):
     def visitInclude(self):
         context.visitInclude(self.name)
 
+    def visitBindSymbol(self):
+        self.dest_variable = context.getSymbol(self.name)
+
 
 class node_ref(base_node):
 
     def __init__(self, meta, node_type, name):
         self.meta = meta
         self.name = name
+        self.dest_variable = '__unknown__'
 
     def toStr(self):
-        return self.name
+        return str(self.dest_variable)
 
     def getChildNodes(self):
         return []
 
     def getType(self):
         return 'int'
+
+    def visitBindSymbol(self):
+        self.dest_variable = context.getSymbol(self.name)
 
 
 def escape(value):
@@ -1453,6 +1773,9 @@ class const_node(base_node):
     def getType(self):
         return self.value_type
 
+    def isConstExpr(self):
+        return self.value_type in constexpr_types
+
 
 node_string = const_node
 node_char = const_node
@@ -1478,7 +1801,7 @@ class node_decorator(base_node):
         TODO
 
     def getChildNodes(self):
-        return []
+        return self.args
 
 
 class node_argvalue(base_node):
@@ -1493,7 +1816,8 @@ class node_argvalue(base_node):
         TODO
 
     def getChildNodes(self):
-        return []
+        assert self.value is not None
+        return [self.value]
 
 
 class node_typedparam(base_node):
@@ -1505,15 +1829,19 @@ class node_typedparam(base_node):
         self.referenced = isinstance(ty, node_referencedtype)
         if self.referenced:
             ty = ty.ty
-        self.ty = 'int' if ty is None else (ty.getReturnType() if isinstance(ty, call_node) and ty.node_type == 'template' else str(ty))
+        self.ty = ty
 
     def toStr(self):
-        return '%s%s%s' % (self.ty, ' & ' if self.referenced else ' ', self.name)
+        ty = 'int' if self.ty is None else (self.ty.getReturnType() if isinstance(self.ty, call_node) and self.ty.node_type == 'template' else str(self.ty))
+        return '%s%s%s' % (ty, ' & ' if self.referenced else ' ', self.name)
 
-    def definesParam(self):
-        context.definesParam(self.name, self.ty)
+    def defines(self):
+        ty = 'int' if self.ty is None else (self.ty.getReturnType() if isinstance(self.ty, call_node) and self.ty.node_type == 'template' else str(self.ty))
+        context.definesParam(self.name, ty)
 
     def getChildNodes(self):
+        if self.ty is not None:
+            return [self.ty]
         return []
 
 
@@ -1551,7 +1879,7 @@ class call_node(base_node):
                 assert len(self.args) == 1
                 return 'get<%s>(%s)' % (self.args[0], self.func)
             return '%s[%s]' % (self.func, ', '.join(str(arg) for arg in self.args))
-        if self.node_type == 'funccall' and len(self.args) == 0 and isinstance(self.func, node_getattr) and self.func.member in ['sort', 'rsort', 'reverse', 'pop', 'shift']:
+        if self.node_type == 'funccall' and len(self.args) == 0 and isinstance(self.func, node_getattr) and self.func.member in ['sort', 'rsort', 'reverse', 'shuffle', 'pop', 'shift']:
             ty = self.func.obj.getType()
             if ty == 'string' or isinstance(ty, Template) and ty.name in ['vector', 'deque']:
                 if self.func.member == 'sort':
@@ -1560,6 +1888,9 @@ class call_node(base_node):
                     return 'sort(%s.rbegin(), %s.rend())' % (self.func.obj, self.func.obj)
                 if self.func.member == 'reverse':
                     return 'reverse(%s.begin(), %s.end())' % (self.func.obj, self.func.obj)
+                if self.func.member == 'shuffle':
+                    context.visitInclude('lrand49')
+                    return 'for(int $1=0, $e=%s.size(); $1<$e; ++$1) swap(%s[$1], %s[lrand49($e-$1)+$1])' % (self.func.obj, self.func.obj, self.func.obj)
                 if self.func.member == 'pop':
                     return '({ auto ret = %s.back(); %s.pop_back(); ret; })' % (self.func.obj, self.func.obj, )
                 if self.func.member == 'shift' and ty.name == 'deque':
@@ -1624,7 +1955,7 @@ class call_node(base_node):
 
     def getType(self):
         if self.node_type == 'funccall':
-            if isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'mean', 'median', 'move'] and len(self.args) == 1:
+            if isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count', 'mean', 'median', 'move'] and len(self.args) == 1:
                 return self.args[0].getType()
             if isinstance(self.func, node_getattr):
                 if self.func.member in ['where', 'eq_to_end', 'eq_to_rend']:
@@ -1669,6 +2000,8 @@ class call_node(base_node):
 
     def defines(self):
         assert self.node_type == 'getitem'
+        for arg in self.args:
+            arg.visit('visitBindSymbol')
         self.func.defines()
 
     def hintType(self, ty, op):
@@ -1691,7 +2024,7 @@ class call_node(base_node):
         return [self.func] + list(self.args)
 
     def getChildNodesForBind(self):
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'mean', 'median'] and len(self.args) == 1:
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count', 'mean', 'median'] and len(self.args) == 1:
             return [self.func]
         else:
             return [self.func] + list(self.args)
@@ -1704,7 +2037,7 @@ class call_node(base_node):
                 self.func.obj.reserveBind()
             elif self.func.member in ['eq_to_end', 'eq_to_rend']:
                 self.func.obj.reserveBind()
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'mean', 'median'] and len(self.args) == 1:
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count', 'mean', 'median'] and len(self.args) == 1:
             self.reserveBind()
             if self.func.name in ['min', 'max']:
                 self.args[0].reserveBind()
@@ -1716,6 +2049,9 @@ class call_node(base_node):
                 if isinstance(ty, Template) and ty.name in ['vector']:
                     return ['%s.resize(max((int)%s.size(), (int)%s))' % (self.func, self.func, size)]
             return self.func.printResize(size, name)
+
+    def isAggregateFunc(self):
+        return self.node_type == 'funccall' and str(self.func) in ['min', 'max', 'sum', 'count', 'mean', 'median'] and len(self.args) == 1
 
 
 call_dic = {
@@ -1819,6 +2155,11 @@ class tuple_node(base_node):
         assert self.node_type == 'tuple'
         for element in self.elements:
             element.defines()
+
+    def definesFor(self):
+        assert self.node_type == 'tuple'
+        for element in self.elements:
+            element.definesFor()
 
     def hintType(self, ty, op):
         assert self.node_type == 'tuple'
@@ -1944,6 +2285,10 @@ class op2_node(base_node):
                 return '%s = min(%s, %s)' % (self.args[0], castToStr(self.args[0], ty), castToStr(self.args[2], ty))
             else:
                 return '%s = max(%s, %s)' % (self.args[0], castToStr(self.args[0], ty), castToStr(self.args[2], ty))
+        if self.node_type == 'assign' and len(self.args) == 3 and self.args[1] == '=' and (isinstance(self.args[0], node_var) or isinstance(self.args[0], node_varhint)):
+            definition = context.getDefinition(self.args[0].varname.name if isinstance(self.args[0], node_varhint) else self.args[0].name)
+            if definition is not None and definition[2] == 2:
+                return ''
         return ' '.join(str(arg) for arg in self.args)
 
     def getType(self):
@@ -1969,7 +2314,7 @@ class op2_node(base_node):
                 context.visitInclude('mod_div')
 
     def getChildNodes(self):
-        return self.args
+        return list(self.args) + [self.mod]
 
 
 node_arith = op2_node
@@ -2249,11 +2594,13 @@ class node_return_stmt(base_node):
     def toStr(self):
         if self.expr is not None:
             return 'return %s' % (self.expr, )
-        if context.parent is None:
+        if context.is_main:
             return 'return 0'
         return 'return'
 
     def getChildNodes(self):
+        if self.expr is not None:
+            return [self.expr]
         return []
 
 

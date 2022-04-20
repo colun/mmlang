@@ -99,7 +99,7 @@ char: (CHAR)+
 STRING: /(".*?(?<!\\)(\\\\)*?")/i
 CHAR: /('.*?(?<!\\)(\\\\)*?')/i
 
-dec_number: /0(|x[\da-f]*|o[0-7]*|b[0-1]*)(ll)?|[1-9]\d*(ll)?/i
+dec_number: /0(x[\da-f]+|o[0-7]+|b[0-1]+|)(ll)?|[1-9]\d*(ll)?/i
 float: /((\d+\.\d*|\.\d+)(e[-+]?\d+)?|\d+(e[-+]?\d+))(ll)?/i
 image_float: float "j"i
 image_number: dec_number "j"i
