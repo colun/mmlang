@@ -1,3 +1,5 @@
+void print_unit() {
+}
 void print_unit(bool val) {
     printf("%s", val ? "true" : "false");
 }
@@ -58,7 +60,6 @@ template<class T>void print_unit(const std::vector<T> & val) {
     printf(" }");
 }
 
-#define _print0()
 #define _print1(e) print_unit(e)
 #define _print2(e1, e2) _print1(e1),fputc(' ', stdout),_print1(e2)
 #define _print3(e1, e2, e3) _print2(e1, e2),fputc(' ', stdout),_print1(e3)
@@ -70,7 +71,7 @@ template<class T>void print_unit(const std::vector<T> & val) {
 #define _print9(e1, e2, e3, e4, e5, e6, e7, e8, e9) _print5(e1, e2, e3, e4, e5),fputc(' ', stdout),_print4(e6, e7, e8, e9)
 #define _print10(e1, e2, e3, e4, e5, e6, e7, e8, e9, e10) _print5(e1, e2, e3, e4, e5),fputc(' ', stdout),_print5(e6, e7, e8, e9, e10)
 #define _GET_PRINT_MACRO_NAME(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, NAME, ...) NAME
-#define print(...) _GET_PRINT_MACRO_NAME(__VA_ARGS__, _print10, _print9, _print8, _print7, _print6, _print5, _print4, _print3, _print2, _print1, _print0)(__VA_ARGS__),fputc('\n', stdout)
-#define print0(...) _GET_PRINT_MACRO_NAME(__VA_ARGS__, _print10, _print9, _print8, _print7, _print6, _print5, _print4, _print3, _print2, _print1, _print0)(__VA_ARGS__)
-#define printF(...) _GET_PRINT_MACRO_NAME(__VA_ARGS__, _print10, _print9, _print8, _print7, _print6, _print5, _print4, _print3, _print2, _print1, _print0)(__VA_ARGS__),fputc('\n', stdout),fflush(stdout)
-#define print0F(...) _GET_PRINT_MACRO_NAME(__VA_ARGS__, _print10, _print9, _print8, _print7, _print6, _print5, _print4, _print3, _print2, _print1, _print0)(__VA_ARGS__),fflush(stdout)
+#define print(...) _GET_PRINT_MACRO_NAME(__VA_ARGS__, _print10, _print9, _print8, _print7, _print6, _print5, _print4, _print3, _print2, _print1)(__VA_ARGS__),fputc('\n', stdout)
+#define print0(...) _GET_PRINT_MACRO_NAME(__VA_ARGS__, _print10, _print9, _print8, _print7, _print6, _print5, _print4, _print3, _print2, _print1)(__VA_ARGS__)
+#define printF(...) _GET_PRINT_MACRO_NAME(__VA_ARGS__, _print10, _print9, _print8, _print7, _print6, _print5, _print4, _print3, _print2, _print1)(__VA_ARGS__),fputc('\n', stdout),fflush(stdout)
+#define print0F(...) _GET_PRINT_MACRO_NAME(__VA_ARGS__, _print10, _print9, _print8, _print7, _print6, _print5, _print4, _print3, _print2, _print1)(__VA_ARGS__),fflush(stdout)

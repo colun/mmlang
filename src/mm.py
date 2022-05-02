@@ -412,7 +412,7 @@ def gen_atcoder(target_path):
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description='MM Language 2.0.0')
+    parser = argparse.ArgumentParser(description='MM Language 2.1.1')
     parser.add_argument('target', metavar='SOURCE', help='source code file/folder')
     arggroup = parser.add_argument_group('build / run / test')
     arggroup.add_argument('--output', metavar='OUTPUT', help='output file/folder')
