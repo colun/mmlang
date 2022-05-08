@@ -16,6 +16,8 @@ setuptools.setup(
     include_package_data=True,
     install_requires=[
         'lark-parser',
+        'colorama',
+        'atcoder-tools',
     ],
     entry_points={
         'console_scripts': [
