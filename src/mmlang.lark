@@ -11,7 +11,7 @@ assert_stmt: "assert" test ["," test]
 
 if_stmt: "if" test ":" suite ("elif" test ":" suite)* ["else" ":" suite]
 while_stmt: "while" test ":" suite ["else" ":" suite]
-for_stmt: "for" [noinstant_tuple "in"] noinstant_tuple ":" suite ["else" ":" suite]
+for_stmt: decorator* "for" [noinstant_tuple "in"] noinstant_tuple ":" suite ["else" ":" suite]
 suite: multi_stmt | _NEWLINE _INDENT stmt+ _DEDENT
 
 funcdef: decorator* "def" var "(" parameters? ")" ["->" test] ":" suite

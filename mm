@@ -1,2 +1,6 @@
-#!/usr/bin/env bash
-python3 `dirname $0`/src/mm.py $@
+#!/usr/bin/env python3
+
+import src
+
+if __name__ == '__main__':
+    src.main()

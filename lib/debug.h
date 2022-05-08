@@ -55,7 +55,7 @@ template<class T>void debug_unit(const std::vector<T> & val) {
     fprintf(stderr, "vec(%d) {", (int)val.size());
     for(int i=0; i<(int)val.size(); ++i) {
         fputc(' ', stderr);
-        fprintf(stderr, val[i]);
+        debug_unit(val[i]);
     }
     fprintf(stderr, " }");
 }

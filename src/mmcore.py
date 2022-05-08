@@ -1,7 +1,7 @@
 import os
-import lib
 import re
-import mmbase
+from . import lib
+from . import mmbase
 
 SRC_DIR = os.path.dirname(__file__)
 ROOT_DIR = os.path.dirname(SRC_DIR)
@@ -170,7 +170,7 @@ def isComprehensionType(ty0, ty1):
         return True
     if ty0 != 'auto' and ty1 == 'auto':
         return True
-    if ty0 == 'double' and ty1 in ['double', 'float', 'int', 'short', 'char', 'bool']:
+    if ty0 == 'double' and ty1 in ['double', 'float', 'unsigned long long', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
         return True
     if ty0 in ['__int128', 'int128'] and ty1 in ['__int128', 'int128', 'unsigned long long', 'uint64', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
         return True
@@ -330,14 +330,22 @@ class CodeContext:
             self.appendInclude(lib.class_definition[name][1])
 
     def get_break(self):
+        assert self.breaks[-1], 'break可能な場所でbreakしてください'
         self.breaks_used[-1] += 1
         return self.breaks[-1]
 
     def get_continue(self):
-        return self.breaks[-1] + 'c'
+        if self.breaks[-1]:
+            return 'goto %s' % (self.breaks[-1], )
+        else:
+            return 'return'
 
     def get_break_used(self):
         return self.breaks_used[-1]
+
+    def push_banbreak(self):
+        self.breaks.append(None)
+        self.breaks_used.append(0)
 
     def push_break(self):
         self.break_label_index += 1
@@ -634,6 +642,9 @@ class Context:
     def push_break(self, *args, **kargs):
         return self.code_context.push_break(*args, **kargs)
 
+    def push_banbreak(self, *args, **kargs):
+        return self.code_context.push_banbreak(*args, **kargs)
+
     def pop_break(self, *args, **kargs):
         return self.code_context.pop_break(*args, **kargs)
 
@@ -855,6 +866,8 @@ class group_node(base_node):
                     suite.defines()
                     context = parentContext
             elif isinstance(child, node_for_stmt):
+                for decorator in child.decorators:
+                    decorator.visit('visitBindSymbol')
                 child.container.visit('visitBindSymbol')
                 parentContext = context
                 context = Context(parentContext, bigScope=False)
@@ -944,9 +957,12 @@ class group_node(base_node):
                     elif func_name == 'max':
                         init_value = getMinMaxValueExpr(ty, False)
                     context.registerInstantSymbol(name, name)
-                    if func_name == 'median':
+                    if func_name in ['median', 'count_uniques']:
                         context.print('std::vector<%s> %s$c;' % (ty, name))
-                    elif func_name == 'count':
+                    elif func_name == 'count_trues':
+                        context.print('int %s = 0;' % (name, ))
+                    elif func_name == 'count_changes':
+                        context.print('%s %s$c = 0;' % (ty, name))
                         context.print('int %s = 0;' % (name, ))
                     elif func_name in ['sum', 'mean']:
                         context.print('%s %s = %s;' % ('int' if ty == 'bool' else ty, name, init_value))
@@ -961,13 +977,15 @@ class group_node(base_node):
                         context.print('if(%s<%s) %s = %s;' % (expr.args[0], name, name, expr.args[0]))
                     elif func_name == 'max':
                         context.print('if(%s<%s) %s = %s;' % (name, expr.args[0], name, expr.args[0]))
-                    elif func_name == 'count':
+                    elif func_name == 'count_trues':
                         context.print('if(%s) ++%s;' % (expr.args[0], name))
+                    elif func_name == 'count_changes':
+                        context.print('{ %s %s$d = %s; if(!%s || %s$c!=%s$d) { ++%s; %s$c = %s$d; } }' % (ty, name, expr.args[0], name, name, name, name, name, name))
                     elif func_name == 'sum':
                         context.print('%s += %s;' % (name, expr.args[0]))
                     elif func_name == 'mean':
                         context.print('{ %s += %s; ++%s$cnt; }' % (name, expr.args[0], name))
-                    elif func_name == 'median':
+                    elif func_name in ['median', 'count_uniques']:
                         context.print('%s$c.push_back(%s);' % (name, expr.args[0]))
                     self.closeNest(nest_count2)
                     context.popInstantSymbols()
@@ -983,6 +1001,25 @@ class group_node(base_node):
                         context.indent()
                         context.print('%s += *std::max_element(%s$c.begin(), %s$c.begin() + (%s$c.size()>>1));' % (name, name, name, name))
                         context.print('%s /= 2;' % (name, ))
+                        context.dedent()
+                        context.print('}')
+                    elif func_name == 'count_uniques':
+                        context.appendInclude('algorithm')
+                        context.print('int %s;' % (name, ))
+                        context.print('if(%s$c.empty()) {' % (name, ))
+                        context.indent()
+                        context.print('%s = 0;' % (name, ))
+                        context.dedent()
+                        context.print('}')
+                        context.print('else {')
+                        context.indent()
+                        context.print('%s = 1;' % (name, ))
+                        context.print('std::sort(%s$c.begin(), %s$c.end());' % (name, name))
+                        context.print('for(int %s$i=1; %s$i<%s$c.size(); ++%s$i) {' % (name, name, name, name))
+                        context.indent()
+                        context.print('if(%s$c[%s$i-1]!=%s$c[%s$i]) ++%s;' % (name, name, name, name, name))
+                        context.dedent()
+                        context.print('}')
                         context.dedent()
                         context.print('}')
                 elif isinstance(expr, call_node) and expr.node_type == 'funccall' and str(expr.func) == 'move':
@@ -1130,6 +1167,8 @@ class group_node(base_node):
                 context.print('if(%s) {' % (testToStr(child.if_data[0]), ))
                 context.indent()
                 child.if_data[1].suiteWithDefines()
+                if use_profiler:
+                    context.print('MM$P(%s);' % (child.meta['line'], ))
                 context.dedent()
                 context.print('}')
                 for elif_row in child.elif_data:
@@ -1137,12 +1176,16 @@ class group_node(base_node):
                         testToStr(elif_row[0]), ))
                     context.indent()
                     elif_row[1].suiteWithDefines()
+                    if use_profiler:
+                        context.print('MM$P(%s);' % (child.meta['line'], ))
                     context.dedent()
                     context.print('}')
                 if child.else_suite is not None:
                     context.print('else {')
                     context.indent()
                     child.else_suite.suiteWithDefines()
+                    if use_profiler:
+                        context.print('MM$P(%s);' % (child.meta['line'], ))
                     context.dedent()
                     context.print('}')
                 done = True
@@ -1150,6 +1193,11 @@ class group_node(base_node):
                 expr = child.container
                 ty = expr.getType()
                 temporary = child.temporary
+                if child.hasParallel():
+                    context.appendInclude('thread_pool.h')
+                    context.print('{')
+                    context.indent()
+                    context.print('MM$ThreadPool $tp%s;' % (child.getParallelConstructorCall(), ))
                 if ty in ['unsigned long long', 'uint64', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
                     temporary, minus_flag = expand_minus(temporary)
                     assert isinstance(temporary, node_var), 'コンテナではなく整数値で暗黙のforを回すのに、ループ変数が単独変数ではありません'
@@ -1212,22 +1260,37 @@ class group_node(base_node):
                                 context.print0(' const %s & %s = %s$fr;' % (iTy, name, '-' if minus_flag else ''))
                     context.print('')
                 context.indent()
-                label = context.push_break()
-                self.printContinueLabel(label)
+                if child.hasParallel():
+                    context.print('$tp.submit([&, %s](int %s) {' % (temporary, child.getParallelWorkerIdVarName()))
+                    context.indent()
+                    label = context.push_banbreak()
+                else:
+                    label = context.push_break()
+                    self.printContinueLabel(label)
                 child.suite.suiteWithDefines()
                 if context.get_break_used() == 0:
                     label = None
                 context.pop_break()
+                if use_profiler:
+                    context.print('MM$P(%s);' % (child.meta['line'], ))
+                if child.hasParallel():
+                    context.dedent()
+                    context.print('});')
                 context.dedent()
                 context.print('}')
                 if child.else_suite is not None:
                     context.print('{')
                     context.indent()
                     child.else_suite.suiteWithDefines()
+                    if use_profiler:
+                        context.print('MM$P(%s);' % (child.meta['line'], ))
                     context.dedent()
                     context.print('}')
                 if label is not None:
                     context.print('%s:;' % (label, ))
+                if child.hasParallel():
+                    context.dedent()
+                    context.print('}')
                 done = True
             elif isinstance(child, node_while_stmt):
                 context.print('while(%s) {' % (child.conditions, ))
@@ -1238,12 +1301,16 @@ class group_node(base_node):
                 if context.get_break_used() == 0:
                     label = None
                 context.pop_break()
+                if use_profiler:
+                    context.print('MM$P(%s);' % (child.meta['line'], ))
                 context.dedent()
                 context.print('}')
                 if child.else_suite is not None:
                     context.print('{')
                     context.indent()
                     child.else_suite.suiteWithDefines()
+                    if use_profiler:
+                        context.print('MM$P(%s);' % (child.meta['line'], ))
                     context.dedent()
                     context.print('}')
                 if label is not None:
@@ -1895,6 +1962,12 @@ class call_node(base_node):
                     return '({ auto ret = %s.back(); %s.pop_back(); ret; })' % (self.func.obj, self.func.obj, )
                 if self.func.member == 'shift' and ty.name == 'deque':
                     return '({ auto ret = %s.front(); %s.pop_front(); ret; })' % (self.func.obj, self.func.obj, )
+        if self.node_type == 'funccall' and len(self.args) == 1 and isinstance(self.func, node_getattr) and self.func.member in ['shuffle']:
+            ty = self.func.obj.getType()
+            if ty == 'string' or isinstance(ty, Template) and ty.name in ['vector', 'deque']:
+                if self.func.member == 'shuffle':
+                    context.visitInclude('lrand49')
+                    return 'for(int $1=0, $e2=%s.size(), $e=min((int)(%s), $e2); $1<$e; ++$1) swap(%s[$1], %s[lrand49($e2-$1)+$1])' % (self.func.obj, self.args[0], self.func.obj, self.func.obj)
         if self.node_type == 'funccall' and isinstance(self.func, node_getattr) and self.func.member in ['lower_bound', 'upper_bound', 'bound', 'where', 'eq_to_end', 'eq_to_rend', 'min', 'max']:
             ty = self.func.obj.getType()
             if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'xvector']:
@@ -1955,8 +2028,10 @@ class call_node(base_node):
 
     def getType(self):
         if self.node_type == 'funccall':
-            if isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count', 'mean', 'median', 'move'] and len(self.args) == 1:
+            if isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'mean', 'median', 'move'] and len(self.args) == 1:
                 return self.args[0].getType()
+            if isinstance(self.func, node_var) and self.func.name in ['count_trues', 'count_uniques', 'count_changes'] and len(self.args) == 1:
+                return 'int'
             if isinstance(self.func, node_getattr):
                 if self.func.member in ['where', 'eq_to_end', 'eq_to_rend']:
                     return self.func.obj.getType()
@@ -2024,7 +2099,7 @@ class call_node(base_node):
         return [self.func] + list(self.args)
 
     def getChildNodesForBind(self):
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count', 'mean', 'median'] and len(self.args) == 1:
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count_trues', 'count_uniques', 'count_changes', 'mean', 'median'] and len(self.args) == 1:
             return [self.func]
         else:
             return [self.func] + list(self.args)
@@ -2037,7 +2112,7 @@ class call_node(base_node):
                 self.func.obj.reserveBind()
             elif self.func.member in ['eq_to_end', 'eq_to_rend']:
                 self.func.obj.reserveBind()
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count', 'mean', 'median'] and len(self.args) == 1:
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count_trues', 'count_uniques', 'count_changes', 'mean', 'median'] and len(self.args) == 1:
             self.reserveBind()
             if self.func.name in ['min', 'max']:
                 self.args[0].reserveBind()
@@ -2051,7 +2126,7 @@ class call_node(base_node):
             return self.func.printResize(size, name)
 
     def isAggregateFunc(self):
-        return self.node_type == 'funccall' and str(self.func) in ['min', 'max', 'sum', 'count', 'mean', 'median'] and len(self.args) == 1
+        return self.node_type == 'funccall' and str(self.func) in ['min', 'max', 'sum', 'count_trues', 'count_uniques', 'count_changes', 'mean', 'median'] and len(self.args) == 1
 
 
 call_dic = {
@@ -2537,18 +2612,48 @@ class node_while_stmt(base_node):
 
 class node_for_stmt(base_node):
 
-    def __init__(self, meta, node_type, temporary, container, suite, else_suite=None):
+    def __init__(self, meta, node_type, *args):
+        args = list(args)
         self.meta = meta
-        self.temporary = temporary
-        self.container = container
-        self.suite = suite
-        self.else_suite = else_suite
+        self.decorators = []
+        while isinstance(args[0], node_decorator):
+            assert args[0].name in 'parallel', 'for文は@parallel以外のデコレータに対応していません'
+            self.decorators.append(args.pop(0))
+        self.temporary = args.pop(0)
+        self.container = args.pop(0)
+        self.suite = args.pop(0)
+        self.else_suite = args.pop(0) if args else None
+
+    def hasParallel(self):
+        for decorator in self.decorators:
+            assert isinstance(decorator, node_decorator)
+            if decorator.name == 'parallel':
+                return True
+        return False
+
+    def getParallelConstructorCall(self):
+        for decorator in self.decorators:
+            assert isinstance(decorator, node_decorator)
+            if decorator.name == 'parallel':
+                for arg in decorator.args:
+                    if isinstance(arg, node_argvalue) and arg.name == 'workers':
+                        return '(%s)' % (arg.value, )
+        return ''
+
+    def getParallelWorkerIdVarName(self):
+        for decorator in self.decorators:
+            assert isinstance(decorator, node_decorator)
+            if decorator.name == 'parallel':
+                for arg in decorator.args:
+                    if isinstance(arg, node_argvalue) and arg.name == 'worker_id':
+                        return arg.value
+        return '$worker_id'
 
     def getChildNodes(self):
         return self.getChildNodesWithoutSuite() + self.getSuiteChildNodes()
 
     def getChildNodesWithoutSuite(self):
-        return [self.temporary, self.container]
+        return self.decorators + [self.temporary, self.container]
 
     def getSuiteChildNodes(self):
         ret = [self.suite]
@@ -2579,7 +2684,7 @@ class node_continue_stmt(base_node):
         self.meta = meta
 
     def toStr(self):
-        return 'goto %s' % context.get_continue()
+        return context.get_continue()
 
     def getChildNodes(self):
         return []
