@@ -1,4 +1,2 @@
-__pycache__
-result.gv
-a.out
-.work
+build
+mmlang.egg-info

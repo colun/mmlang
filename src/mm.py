@@ -8,7 +8,7 @@ import urllib.request
 import lark
 import lark.indenter
 import json
-import mmcore
+from . import mmcore
 import concurrent.futures
 import re
 import colorama
@@ -16,9 +16,11 @@ import hashlib
 import copy
 import time
 
+__version__ = open(os.path.join(os.path.dirname(__file__), '..', 'version.txt')).read()
+
 SRC_DIR = os.path.dirname(__file__)
 ROOT_DIR = os.path.dirname(SRC_DIR)
-WORK_DIR = os.path.join(ROOT_DIR, '.work')
+WORK_DIR = os.path.join(os.environ['HOME'], '.mmlang')
 
 grammer = open('%s/mmlang.lark' % (SRC_DIR, )).read()
 
@@ -32,9 +34,10 @@ parser = lark.Lark(grammer, parser='lalr', postlex=MyIndenter(), propagate_posit
 def expand(node):
     if isinstance(node, lark.Token):
         return node.value
-    else:
-        assert isinstance(node, lark.Tree)
+    elif isinstance(node, lark.Tree):
         return mmcore.__dict__['node_' + node.data](node.meta.__dict__, node.data, *(expand(child) for child in node.children))
+    else:
+        assert isinstance(node, lark.Token) or isinstance(node, lark.Tree)
 
 
 def compile_raw(args):
@@ -173,8 +176,7 @@ def build(args):
         options.append('-DMM$VIS')
     if args.test:
         options.append('-DMM$TEST')
-    if args.profiler:
-        options.append('-pthread')
+    options.append('-pthread')
     subprocess.run(['g++', '-std=gnu++14'] + options + ['-O2', args.output_path, '-o', args.aout])
     args.build_success = os.path.exists(args.aout)
     if args.build_success:
@@ -276,7 +278,7 @@ def run(args):
             spend_time = spend_time[3:] + ' sec'
         if spend_time.startswith('0'):
             spend_time = spend_time[1:]
-    print(f'time: {spend_time}')
+    print(f'time: {spend_time}', file=sys.stderr)
     if os.path.exists('result.gv'):
         gvc_path = os.path.join(WORK_DIR, 'gvc', 'gvc.jar')
         download('https://github.com/colun/gvc/raw/master/gvc.jar', gvc_path)
@@ -296,7 +298,7 @@ def compile_file(origin_outs, target_path, output_path, args):
     else:
         args.cwd = '.'
         if args.output_path is None:
-            args.output_path = os.path.join(WORK_DIR, 'output', 'output.cpp')
+            args.output_path = os.path.join(WORK_DIR, 'work', 'default', 'output.cpp')
     dir_path = os.path.dirname(args.output_path)
     if dir_path:
         os.makedirs(dir_path, exist_ok=True)
@@ -412,7 +414,7 @@ def gen_atcoder(target_path):
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description='MM Language 2.1.1')
+    parser = argparse.ArgumentParser(description='MM Language ' + __version__)
     parser.add_argument('target', metavar='SOURCE', help='source code file/folder')
     arggroup = parser.add_argument_group('build / run / test')
     arggroup.add_argument('--output', metavar='OUTPUT', help='output file/folder')

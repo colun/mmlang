@@ -20,6 +20,7 @@ func_definition = {
     'int': ('int', None),
     'short': ('short', None),
     'char': ('char', None),
+    'uchar': ('unsigned char', None),
     'uint64': ('unsigned long long', None),
     'int64': ('long long', None),
     'int128': ('__int128', None),
@@ -76,6 +77,7 @@ func_definition = {
     'xmem_lock': (None, 'xmem.h'),
     'xmem_unlock': (None, 'xmem.h'),
     'xmem_undo': (None, 'xmem.h'),
+    'usleep': (None, 'unistd.h'),
 }
 dependency = {
     'input_c_line_or_word.h': ['cassert', 'cstdio', 'cstring'],
@@ -124,6 +126,7 @@ dependency = {
     'init_params.h': ['map', 'string'],
     'modint.h': ['mod_mul.h'],
     'binary_file.h': ['cassert', 'cstdio', 'cstring'],
+    'thread_pool.h': ['cassert', 'vector', 'deque', 'thread', 'mutex', 'functional'],
 }
 nocompress = set([
 ])
@@ -205,6 +208,13 @@ class_definition = {
         'top': '$1',
         'empty': 'bool',
     }, 'xpque.h'),
+    'dpque': ({
+        'size': 'int',
+        '__getitem__': '$1',
+        'large': '$1',
+        'small': '$1',
+        'empty': 'bool',
+    }, 'dpque.h'),
     'xvar': ({
     }, 'xvar.h'),
     'fast_pque': ({
