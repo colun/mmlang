@@ -30,18 +30,30 @@ MM Language プロジェクトでは、プロジェクトの様々な部分を�
 
 kimiyukiさん解釈だと現状のライセンスなしの状態であれば競プロ利用が文化的に困らないであろう推定判断が可能な様なので、ライセンスなしのまま長期間放置される可能性があります。
 
+インストールについて
+--------------------
+
+事前にpython3, pip3, g++などが必要になると思います。
+
+    sudo python3 setup.py install
+
+などでインストール可能と思われます。
+
 使い方
 ------
 
-python3のインストールおよび、 `python3 -m pip install lark-parser` などでのlark-parserのインストールが必要となります。
-mmにパスを通して、任意の場所から起動してください。以下の様なUSAGEが表示されます。
+下記のコマンドで任意の場所から起動してください。
 
-    usage: mm.py [-h] [--output OUTPUT] [--build] [--run] [--test] [--test-size N]
-                 [--test-seed N] [--test1] [--test-name NAME] [--workers N]
-                 [--profiler] [--ndebug] [--novis] [--release] [--ac-gen]
-                 [--ac-test] [--ac-submit] [--ac-submit-folder] [--ac-submit2]
-                 SOURCE
-    mm.py: error: the following arguments are required: SOURCE
+    mm
+
+以下の様なUSAGEが表示されます。
+
+    usage: mm [-h] [--output OUTPUT] [--build] [--run] [--test] [--test-size N]
+              [--test-seed N] [--test1] [--test-name NAME] [--workers N]
+              [--profiler] [--ndebug] [--novis] [--release] [--ac-gen]
+              [--ac-test] [--ac-submit] [--ac-submit-folder] [--ac-submit2]
+              SOURCE
+    mm: error: the following arguments are required: SOURCE
 
 SOURCEのみの指定の場合、SOURCEは.m2ファイルである必要があり、生成されたC++コードは標準出力に表示されます。
 --outputを指定した場合、標準出力の代わりに、OUTPUTへと生成されたC++コードが保存されます。
