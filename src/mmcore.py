@@ -75,7 +75,7 @@ class Template:
 
 def testToStr(expr):
     ty = expr.getType()
-    if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'list', 'stack', 'queue', 'priority_queue', 'fast_pque', 'xpque', 'set', 'multiset']:
+    if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'list', 'stack', 'queue', 'priority_queue', 'fast_pque', 'fast_pque_vk', 'set_pque', 'xpque', 'set', 'multiset']:
         return '!%s.empty()' % (expr, )
     return str(expr)
 
@@ -171,6 +171,8 @@ def isComprehensionType(ty0, ty1):
     if ty0 != 'auto' and ty1 == 'auto':
         return True
     if ty0 == 'double' and ty1 in ['double', 'float', 'unsigned long long', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
+        return True
+    if ty0 == 'float' and ty1 in ['float', 'unsigned long long', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
         return True
     if ty0 in ['__int128', 'int128'] and ty1 in ['__int128', 'int128', 'unsigned long long', 'uint64', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
         return True
@@ -336,7 +338,7 @@ class CodeContext:
 
     def get_continue(self):
         if self.breaks[-1]:
-            return 'goto %s' % (self.breaks[-1], )
+            return 'goto %sc' % (self.breaks[-1], )
         else:
             return 'return'
 
@@ -361,14 +363,14 @@ class CodeContext:
 
 class Context:
 
-    def __init__(self, parent=None, bigScope=True):
+    def __init__(self, parent=None, scopeLevel=0):
         self.code_context = CodeContext() if parent is None else parent.code_context
-        self.is_main = (parent is None) if bigScope else parent.is_main
+        self.is_main = (parent is None) if scopeLevel==0 else parent.is_main
         self.instant = []
         self.instant_l_count = 0
         self.instant_c_count = 0
         self.parent = parent
-        self.bigScope = bigScope
+        self.scopeLevel = scopeLevel
         self.func_types = {}
         self.definitions = {}
         self.temporaryDefinitions = {}
@@ -402,10 +404,20 @@ class Context:
         else:
             assert False
 
-    def getBigScope(self):
-        if self.bigScope:
+    def getScope0(self):
+        if self.scopeLevel==0:
             return self
-        return self.parent.getBigScope()
+        return self.parent.getScope0()
+
+    def getScope1(self):
+        if self.scopeLevel<=1:
+            return self
+        return self.parent.getScope1()
+
+    def getScope2(self):
+        if self.scopeLevel<=2:
+            return self
+        return self.parent.getScope2()
 
     def nameLoop(self, name):
         assert name is None or isinstance(name, str)
@@ -799,7 +811,7 @@ class group_node(base_node):
     def start(self, profiler_flag):
         global context
         global use_profiler
-        context = Context(bigScope=True)
+        context = Context(scopeLevel=0)
         use_profiler = profiler_flag
         if use_profiler:
             context.appendInclude('profiler.h')
@@ -862,7 +874,7 @@ class group_node(base_node):
                     condition.visit('visitBindSymbol')
                 for suite in child.getSuiteChildNodes():
                     parentContext = context
-                    context = Context(parentContext, bigScope=False)
+                    context = Context(parentContext, scopeLevel=1)
                     suite.defines()
                     context = parentContext
             elif isinstance(child, node_for_stmt):
@@ -870,17 +882,17 @@ class group_node(base_node):
                     decorator.visit('visitBindSymbol')
                 child.container.visit('visitBindSymbol')
                 parentContext = context
-                context = Context(parentContext, bigScope=False)
+                context = Context(parentContext, scopeLevel=1)
                 child.temporary.definesFor()
                 child.suite.defines()
                 if child.else_suite is not None:
-                    context = Context(parentContext, bigScope=False)
+                    context = Context(parentContext, scopeLevel=1)
                     child.else_suite.defines()
                 context = parentContext
             elif isinstance(child, node_funcdef):
                 child.visit('visitBindSymbol', childrenMethods='getChildNodesWithoutSuite')
                 parentContext = context
-                context = Context(parentContext, bigScope=True)
+                context = Context(parentContext, scopeLevel=0)
                 child.defines()
                 context = parentContext
             elif isinstance(child, op2_node) and child.node_type == 'assign':
@@ -964,6 +976,10 @@ class group_node(base_node):
                     elif func_name == 'count_changes':
                         context.print('%s %s$c = 0;' % (ty, name))
                         context.print('int %s = 0;' % (name, ))
+                    elif func_name == 'any':
+                        context.print('bool %s = false;' % (name, ))
+                    elif func_name == 'all':
+                        context.print('bool %s = true;' % (name, ))
                     elif func_name in ['sum', 'mean']:
                         context.print('%s %s = %s;' % ('int' if ty == 'bool' else ty, name, init_value))
                     else:
@@ -981,6 +997,10 @@ class group_node(base_node):
                         context.print('if(%s) ++%s;' % (expr.args[0], name))
                     elif func_name == 'count_changes':
                         context.print('{ %s %s$d = %s; if(!%s || %s$c!=%s$d) { ++%s; %s$c = %s$d; } }' % (ty, name, expr.args[0], name, name, name, name, name, name))
+                    elif func_name == 'any':
+                        context.print('if(%s) { %s = true; break; }' % (expr.args[0], name))
+                    elif func_name == 'all':
+                        context.print('if(!(%s)) { %s = false; break; }' % (expr.args[0], name))
                     elif func_name == 'sum':
                         context.print('%s += %s;' % (name, expr.args[0]))
                     elif func_name == 'mean':
@@ -1234,11 +1254,13 @@ class group_node(base_node):
                             temporary = '$fr'
                     for name, iTy, minus_flag in temporaries:
                         context.defineTemporaryDefinition(name, iTy)
-                    if isinstance(ty, Template) and ty.name in ['stack', 'queue', 'priority_queue', 'fast_pque', 'xpque']:
+                    if isinstance(ty, Template) and ty.name in ['stack', 'queue', 'priority_queue', 'fast_pque', 'fast_pque_vk', 'set_pque', 'xpque']:
                         D = {
                             'queue': 'front',
                             'priority_queue': 'top',
                             'fast_pque': 'top',
+                            'fast_pque_vk': 'top',
+                            'set_pque': 'top',
                             'xpque': 'top',
                             'stack': 'top',
                         }
@@ -1392,7 +1414,9 @@ class node_funcdef(base_node):
                     keyvalues[arg.name] = arg.value
                 else:
                     values.append(arg)
-            ret[decorator.name] = values, keyvalues
+            if decorator.name not in ret:
+                ret[decorator.name] = []
+            ret[decorator.name].append((values, keyvalues))
         return ret
 
     def visitDefineFunc(self):
@@ -1402,9 +1426,10 @@ class node_funcdef(base_node):
 
         func_name = self.name
         decorators = self.getDecorators()
-        memo = decorators.get('memo', None)
-        beam = decorators.get('beam', None)
-        sa_dac = decorators.get('sa_dac', None)
+        memo = decorators.get('memo', [None])[0]
+        beam = decorators.get('beam', [None])[0]
+        sa_dac = decorators.get('sa_dac', [None])[0]
+        penalty_hashes = {kv['varname'].name: str(kv['function']) if 'function' in kv else None for (v, kv) in decorators.get('penalty_hash', []) if isinstance(kv.get('varname'), node_var)}
         xheu_type = None
         xheu = None
         if beam is not None:
@@ -1484,37 +1509,76 @@ class node_funcdef(base_node):
             maxwidth = xheu[1].get('maxwidth', None)
             timelimit = xheu[1].get('timelimit', None)
             verbose = xheu[1].get('verbose', None)
+            visitclear = xheu[1].get('visitclear', None)
             if xheu_type == 'beam':
                 context.appendInclude('xbeam.h')
                 context.print('xbeam %s$so;' % (self.name, ))
             elif xheu_type == 'sa_dac':
                 context.appendInclude('xsa_dac.h')
                 context.print('xsa_dac %s$so;' % (self.name, ))
-            hash_ty = None
+            clear_with_inits = []
             for param in self.parameters:
-                if param.name == 'hash':
-                    hash_ty = param.ty
-            if hash_ty is not None:
-                if hash_ty in ['uint64', 'int64']:
-                    context.appendInclude('fast_weak_set64.h')
-                    context.print('fast_weak_set64<> %s$visited;' % (self.name, ))
-                else:
-                    context.appendInclude('fast_weak_set32.h')
-                    context.print('fast_weak_set32<> %s$visited;' % (self.name, ))
+                if param.name in penalty_hashes:
+                    clear_with_inits.append('%s$%s$counter' % (self.name, param.name))
+                    if param.ty in ['uint64', 'int64']:
+                        context.appendInclude('fast_weak_counter64.h')
+                        context.print('fast_weak_counter64<> %s$%s$counter;' % (self.name, param.name))
+                    else:
+                        context.appendInclude('fast_weak_counter32.h')
+                        context.print('fast_weak_counter32<> %s$%s$counter;' % (self.name, param.name))
+                elif param.name == 'hash':
+                    clear_with_inits.append('%s$visited' % (self.name, ))
+                    if param.ty in ['uint64', 'int64']:
+                        context.appendInclude('fast_weak_set64.h')
+                        context.print('fast_weak_set64<> %s$visited;' % (self.name, ))
+                    else:
+                        context.appendInclude('fast_weak_set32.h')
+                        context.print('fast_weak_set32<> %s$visited;' % (self.name, ))
+                    if visitclear is not None:
+                        context.print('int %s$remain_depth;' % (self.name, ))
             context.print('void %s$loop() {' % (self.name, ))
             context.indent()
             context.print('while(%s$so.onloop()) {' % (self.name, ))
             context.indent()
             paramTypeMethodDic = {
+                'short': 'nextShort',
                 'int': 'nextInt',
                 'int64': 'nextInt64',
                 'float': 'nextFloat',
                 'bool': 'nextBool',
             }
+            penalty_hash_flag = False
+            hash_flag = False
             for param in self.parameters:
                 context.print('auto %s = %s$so.%s();' % (param.name, self.name, paramTypeMethodDic[str(param.ty)]))
-                if param.name == 'hash':
-                    context.print('if(%s$visited.testWithSet(hash)) continue;' % (self.name, ))
+                if param.name in penalty_hashes:
+                    penalty_hash_flag = True
+                elif param.name == 'hash':
+                    hash_flag = True
+            if penalty_hash_flag and 'score' in [param.name for param in self.parameters]:
+                context.print('double $score = score;')
+                context.print('int $cnt;')
+                for param in self.parameters:
+                    if param.name in penalty_hashes:
+                        context.print('$cnt = %s$%s$counter.get(%s);' % (self.name, param.name, param.name))
+                        if penalty_hashes[param.name] is not None:
+                            context.print('if($cnt) $score -= %s($cnt);' % (penalty_hashes[param.name], ))
+                        else:
+                            context.print('if($cnt) $score -= $cnt;')
+                context.print('if(%s$so.reschedule($score)) continue;' % (self.name, ))
+            if hash_flag:
+                if visitclear is not None:
+                    context.print('if(%s$remain_depth!=%s$so.getRemainDepth()) {' % (self.name, self.name))
+                    context.indent()
+                    context.print('%s$remain_depth = %s$so.getRemainDepth();' % (self.name, self.name))
+                    context.print('if(%s) %s$visited.clear();' % (visitclear, self.name))
+                    context.dedent()
+                    context.print('}')
+                context.print('if(%s$visited.testWithSet(%s)) continue;' % (self.name, param.name))
+            if penalty_hash_flag and 'score' in [param.name for param in self.parameters]:
+                for param in self.parameters:
+                    if param.name in penalty_hashes:
+                        context.print('%s$%s$counter.count(%s);' % (self.name, param.name, param.name))
             context.print('%s$so.accept();' % (self.name, ))
             context.print('%s$origin(%s);' % (
                 self.name, ', '.join(param.name for param in self.parameters)))
@@ -1539,9 +1603,11 @@ class node_funcdef(base_node):
             context.print('else {')
             context.indent()
             context.print('%s$lock = true;' % (self.name, ))
-            if hash_ty is not None:
-                context.print('%s$visited.clear();' % (self.name, ))
+            for clear_with_init in clear_with_inits:
+                context.print('%s.clear();' % (clear_with_init, ))
             context.print('%s$so.init((%s)+1, %s, %s);' % (self.name, maxdepth, timelimit, maxwidth))
+            if visitclear is not None:
+                context.print('%s$remain_depth = (%s)+1;' % (self.name, maxdepth))
             if verbose is not None:
                 context.print('%s$so.setVerbose(%s);' % (self.name, verbose))
             context.print('if(%s$so.reserve(%s)) {' % (self.name, 'score' if 'score' in [param.name for param in self.parameters] else '0'))
@@ -1968,6 +2034,12 @@ class call_node(base_node):
                 if self.func.member == 'shuffle':
                     context.visitInclude('lrand49')
                     return 'for(int $1=0, $e2=%s.size(), $e=min((int)(%s), $e2); $1<$e; ++$1) swap(%s[$1], %s[lrand49($e2-$1)+$1])' % (self.func.obj, self.args[0], self.func.obj, self.func.obj)
+        if self.node_type == 'funccall' and len(self.args) == 2 and isinstance(self.func, node_getattr) and self.func.member in ['shuffle']:
+            ty = self.func.obj.getType()
+            if ty == 'string' or isinstance(ty, Template) and ty.name in ['vector', 'deque']:
+                if self.func.member == 'shuffle':
+                    context.visitInclude('lrand49')
+                    return 'for(int $1=%s, $e2=%s.size(), $e=min((int)(%s), $e2); $1<$e; ++$1) swap(%s[$1], %s[lrand49($e2-$1)+$1])' % (self.args[0], self.func.obj, self.args[1], self.func.obj, self.func.obj)
         if self.node_type == 'funccall' and isinstance(self.func, node_getattr) and self.func.member in ['lower_bound', 'upper_bound', 'bound', 'where', 'eq_to_end', 'eq_to_rend', 'min', 'max']:
             ty = self.func.obj.getType()
             if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'xvector']:
@@ -2032,6 +2104,8 @@ class call_node(base_node):
                 return self.args[0].getType()
             if isinstance(self.func, node_var) and self.func.name in ['count_trues', 'count_uniques', 'count_changes'] and len(self.args) == 1:
                 return 'int'
+            if isinstance(self.func, node_var) and self.func.name in ['any', 'all'] and len(self.args) == 1:
+                return 'bool'
             if isinstance(self.func, node_getattr):
                 if self.func.member in ['where', 'eq_to_end', 'eq_to_rend']:
                     return self.func.obj.getType()
@@ -2099,7 +2173,7 @@ class call_node(base_node):
         return [self.func] + list(self.args)
 
     def getChildNodesForBind(self):
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count_trues', 'count_uniques', 'count_changes', 'mean', 'median'] and len(self.args) == 1:
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'median'] and len(self.args) == 1:
             return [self.func]
         else:
             return [self.func] + list(self.args)
@@ -2112,7 +2186,7 @@ class call_node(base_node):
                 self.func.obj.reserveBind()
             elif self.func.member in ['eq_to_end', 'eq_to_rend']:
                 self.func.obj.reserveBind()
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count_trues', 'count_uniques', 'count_changes', 'mean', 'median'] and len(self.args) == 1:
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'median'] and len(self.args) == 1:
             self.reserveBind()
             if self.func.name in ['min', 'max']:
                 self.args[0].reserveBind()
@@ -2122,11 +2196,11 @@ class call_node(base_node):
             if (isinstance(self.args[0], loop_node) or isinstance(self.args[0], node_ref) or isinstance(self.args[0], node_var)) and str(self.args[0]) == name:
                 ty = self.func.getType()
                 if isinstance(ty, Template) and ty.name in ['vector']:
-                    return ['%s.resize(max((int)%s.size(), (int)%s))' % (self.func, self.func, size)]
+                    return ['%s.resize(max((int)%s.size(), (int)(%s)))' % (self.func, self.func, size)]
             return self.func.printResize(size, name)
 
     def isAggregateFunc(self):
-        return self.node_type == 'funccall' and str(self.func) in ['min', 'max', 'sum', 'count_trues', 'count_uniques', 'count_changes', 'mean', 'median'] and len(self.args) == 1
+        return self.node_type == 'funccall' and str(self.func) in ['min', 'max', 'sum', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'median'] and len(self.args) == 1
 
 
 call_dic = {
@@ -2157,7 +2231,7 @@ class node_getattr(base_node):
         ty = self.obj.getType()
 
         if self.member in ['pop', 'shift', 'top', 'back', 'front']:
-            if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'queue', 'priority_queue', 'fast_pque', 'xpque', 'stack'] and 1 <= len(ty.args):
+            if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'queue', 'priority_queue', 'fast_pque', 'set_pque', 'xpque', 'stack'] and 1 <= len(ty.args):
                 return ty.args[0]
         if self.member in ['lower_bound', 'upper_bound']:
             return 'int'
@@ -2452,6 +2526,18 @@ class pre_op1_node(base_node):
 
     def getType(self):
         return self.child_node.getType()
+
+    def defines(self):
+        assert self.op == '-'
+        self.child_node.defines()
+
+    def hintType(self, ty, op):
+        assert self.op == '-'
+        self.child_node.hintType(ty, op)
+
+    def countMutate(self):
+        assert self.op == '-'
+        self.child_node.countMutate()
 
 
 pre_op1_dic = {

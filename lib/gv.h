@@ -4,31 +4,42 @@ struct gvRGB {
     int b;
     gvRGB(int r, int g, int b) : r(r), g(g), b(b) {
     }
+    gvRGB(const std::vector<int> & rgb) : r(rgb[0]), g(rgb[1]), b(rgb[2]) {
+    }
     int toInt() const {
         return ((r & 255) << 16) | ((g & 255) << 8) | (b & 255);
     }
 };
 #ifdef MM$VIS
 FILE * gv$file = NULL;
+bool gv$flushFlag = true;
 void gvInit() {
     if(gv$file==NULL) {
         gv$file = fopen("result.gv", "w+");
     }
 }
 void gvFlush() {
-    assert(gv$file);
-    fflush(gv$file);
+    gv$flushFlag = false;
+    if(gv$file) {
+        fflush(gv$file);
+    }
+}
+void gvFlush_() {
+    if(gv$flushFlag) {
+        assert(gv$file);
+        fflush(gv$file);
+    }
 }
 inline bool gvTime() {
     gvInit();
     fprintf(gv$file, "n\n");
-    gvFlush();
+    gvFlush_();
     return true;
 }
 inline bool gvTime(double t) {
     gvInit();
     fprintf(gv$file, "n %g\n", t);
-    gvFlush();
+    gvFlush_();
     return true;
 }
 double gv$fps = -1000000000.0;
@@ -46,12 +57,12 @@ inline bool gvFps() {
 void gvCircle(double x, double y) {
     gvInit();
     fprintf(gv$file, "c %g %g\n", x, y);
-    gvFlush();
+    gvFlush_();
 }
 void gvCircle(double x, double y, double r, gvRGB rgb) {
     gvInit();
     fprintf(gv$file, "c %g %g %d %g\n", x, y, rgb.toInt(), r);
-    gvFlush();
+    gvFlush_();
 }
 void gvCircle(double x, double y, double r) {
     gvCircle(x, y, r, gvRGB(0, 0, 0));
@@ -59,7 +70,7 @@ void gvCircle(double x, double y, double r) {
 void gvCircle(double x, double y, gvRGB rgb) {
     gvInit();
     fprintf(gv$file, "c %g %g %d\n", x, y, rgb.toInt());
-    gvFlush();
+    gvFlush_();
 }
 void gvRect(double x, double y, double x2, double y2, double r, gvRGB rgb) {
     double bx = min(x, x2) - fabs(r);
@@ -74,7 +85,7 @@ void gvRect(double x, double y, double x2, double y2, double r, gvRGB rgb) {
     fprintf(gv$file, " %g %g", ex, ey);
     fprintf(gv$file, " %g %g", bx, ey);
     fprintf(gv$file, "\n");
-    gvFlush();
+    gvFlush_();
 }
 void gvRect(double x, double y, double x2, double y2, gvRGB rgb) {
     gvRect(x, y, x2, y2, 0.5, rgb);
@@ -105,7 +116,7 @@ void gvText(double x, double y, double r, gvRGB rgb, const char * format = "?", 
     vfprintf(gv$file, format, arg);
     va_end(arg);
     fprintf(gv$file, "\n");
-    gvFlush();
+    gvFlush_();
 }
 void gvText(double x, double y, double r, const char * format = "?", ...) {
     gvInit();
@@ -115,7 +126,7 @@ void gvText(double x, double y, double r, const char * format = "?", ...) {
     vfprintf(gv$file, format, arg);
     va_end(arg);
     fprintf(gv$file, "\n");
-    gvFlush();
+    gvFlush_();
 }
 void gvText(double x, double y, gvRGB rgb, const char * format = "?", ...) {
     gvInit();
@@ -125,7 +136,7 @@ void gvText(double x, double y, gvRGB rgb, const char * format = "?", ...) {
     vfprintf(gv$file, format, arg);
     va_end(arg);
     fprintf(gv$file, "\n");
-    gvFlush();
+    gvFlush_();
 }
 void gvText(double x, double y, const char * format = "?", ...) {
     gvInit();
@@ -135,7 +146,7 @@ void gvText(double x, double y, const char * format = "?", ...) {
     vfprintf(gv$file, format, arg);
     va_end(arg);
     fprintf(gv$file, "\n");
-    gvFlush();
+    gvFlush_();
 }
 void gvTextLeft(double x, double y, double r, gvRGB rgb, const char * format = "?", ...) {
     gvInit();
@@ -145,7 +156,7 @@ void gvTextLeft(double x, double y, double r, gvRGB rgb, const char * format = "
     vfprintf(gv$file, format, arg);
     va_end(arg);
     fprintf(gv$file, "\n");
-    gvFlush();
+    gvFlush_();
 }
 void gvTextLeft(double x, double y, double r, const char * format = "?", ...) {
     gvInit();
@@ -155,7 +166,7 @@ void gvTextLeft(double x, double y, double r, const char * format = "?", ...) {
     vfprintf(gv$file, format, arg);
     va_end(arg);
     fprintf(gv$file, "\n");
-    gvFlush();
+    gvFlush_();
 }
 void gvTextLeft(double x, double y, gvRGB rgb, const char * format = "?", ...) {
     gvInit();
@@ -165,7 +176,7 @@ void gvTextLeft(double x, double y, gvRGB rgb, const char * format = "?", ...) {
     vfprintf(gv$file, format, arg);
     va_end(arg);
     fprintf(gv$file, "\n");
-    gvFlush();
+    gvFlush_();
 }
 void gvTextLeft(double x, double y, const char * format = "?", ...) {
     gvInit();
@@ -175,7 +186,7 @@ void gvTextLeft(double x, double y, const char * format = "?", ...) {
     vfprintf(gv$file, format, arg);
     va_end(arg);
     fprintf(gv$file, "\n");
-    gvFlush();
+    gvFlush_();
 }
 void gvLine(double x1, double y1, double x2, double y2, double r, gvRGB rgb) {
     double odx = x2-x1;
@@ -197,7 +208,7 @@ void gvLine(double x1, double y1, double x2, double y2, double r, gvRGB rgb) {
     fprintf(gv$file, " %g %g", x2-dx*(0.05*sqrt(2)/(1+sqrt(2)))+dy*0.05, y2-dy*(0.05*sqrt(2)/(1+sqrt(2)))-dx*0.05);
     fprintf(gv$file, " %g %g", x2+dy*(0.05/(1+sqrt(2))), y2-dx*(0.05/(1+sqrt(2))));
     fprintf(gv$file, "\n");
-    gvFlush();
+    gvFlush_();
 }
 void gvLine(double x1, double y1, double x2, double y2, double r) {
     gvLine(x1, y1, x2, y2, r, gvRGB(0, 0, 0));
@@ -248,7 +259,7 @@ void gvArrow(double x1, double y1, double x2, double y2, double r, gvRGB rgb) {
     fprintf(gv$file, " %g %g", x2_5+dy5, y2_5-dx5);
     fprintf(gv$file, " %g %g", x2+dy0, y2-dx0);
     fprintf(gv$file, "\n");
-    gvFlush();
+    gvFlush_();
 }
 void gvArrow(double x1, double y1, double x2, double y2, double r) {
     gvArrow(x1, y1, x2, y2, r, gvRGB(0, 0, 0));
@@ -260,6 +271,7 @@ void gvArrow(double x1, double y1, double x2, double y2) {
     gvArrow(x1, y1, x2, y2, 0.5);
 }
 #else
+#define gvFlush(...)
 #define gvFps(...) false
 #define gvTime(...) false
 #define gvCircle(...)

@@ -48,6 +48,11 @@ def compile_raw(args):
         print()
         print('*/')
         print()
+        if not args.profiler:
+            #print('#pragma GCC target ("avx2")')
+            print('#pragma GCC optimize("O3")')
+            print('#pragma GCC optimize("unroll-loops")')
+            #print('#pragma GCC target("sse,sse2,sse3,ssse3,sse4,popcnt,abm,mmx,avx,tune=native")')
         print('#ifndef MM$DBG')
         print('#define NDEBUG')
         print('#endif')
@@ -153,6 +158,7 @@ def download(url, dst):
         import requests
         with open(cache, 'wb') as f:
             f.write(requests.get(url).content)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
     with open(cache, 'rb') as f:
         with open(dst, 'wb') as f2:
             f2.write(f.read())
@@ -205,7 +211,7 @@ def test(args):
             os.remove('result.gv')
         seed = tests[args.test_seed] if tests else args.test_seed
         if command:
-            subprocess.run(command.replace('{$SEED}', seed).split(' '), cwd=args.cwd)
+            subprocess.run(command.replace('{$SEED}', str(seed)).split(' '), cwd=args.cwd)
         else:
             subprocess.run(['./a.out'], stdin=open(tests[args.test_seed]), cwd=args.cwd)
         if os.path.exists('result.gv'):

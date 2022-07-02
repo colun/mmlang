@@ -75,6 +75,9 @@ struct xbeam {
         }
         rnk->clear();
     }
+    int getRemainDepth() const {
+        return remain_depth;
+    }
     void init(int max_depth_, double timeLimit=9.8, int max_beam_size_=2000) {
         infoAcceptCount = 0;
         infoDepthAcceptCount = 0;
@@ -165,13 +168,39 @@ struct xbeam {
         current_node = next_node;
         next_node = NULL;
     }
+    long long get_current_node() {
+        assert(current_node);
+        current_node->addRef();
+        return (long long)(void*)current_node;
+    }
+    void release_node(long long node) {
+        ((xbeam$node *)(void *)node)->release();
+    }
+    long long parent_node(long long node) {
+        return (long long)(void*)(((xbeam$node *)(void *)node)->parent);
+    }
+    void undo_node(long long node) {
+        xmem::undo(((xbeam$node *)(void *)node)->patch);
+    }
+    void redo_node(void * node) {
+        xmem::redo(((xbeam$node *)(void *)node)->patch);
+    }
     bool onloop() {
         if(next_node) {
             next_node->release();
             next_node = NULL;
         }
         else {
-            current_node->patch = myxmem.build();
+            if(current_node->parent) {
+                current_node->patch = myxmem.build_undo();
+                xbeam$node * node = current_node->parent;
+                node->addRef();
+                current_node->release();
+                current_node = node;
+            }
+            else {
+                current_node->patch = myxmem.build();
+            }
         }
         double t = getTime();
         if(nextLimit<=t || current_ranking->empty()) {
@@ -212,6 +241,18 @@ struct xbeam {
         }
         //TODO: ハッシュの扱いをどうする？→ハッシュはnextIntで突っ込んでおけば大丈夫。
         next_ranking->emplace(score, xbeam$node::create(current_node, nmem.alloc()));
+        return true;
+    }
+    bool reschedule(double score) {
+        if(current_ranking->empty()) {
+            return false;
+        }
+        if(current_ranking->large().first<=score) {
+            return false;
+        }
+        assert(next_node);
+        next_node->addRef();
+        current_ranking->emplace(score, next_node);
         return true;
     }
     //以下、シリアライズ系
