@@ -6,3 +6,7 @@ inline int mrand49() {
     unsigned int rot = (mrand49$state>>59);
     return (ret>>rot) | (ret<<-rot);
 }
+inline int mrand49(int r) {
+    assert(r);
+    return asm_mul_hi(mrand49(), r);
+}

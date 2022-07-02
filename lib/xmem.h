@@ -2,6 +2,7 @@ struct xmem {
     static char * base_ptr;
     static int buffer_size;
     static int redo_size;
+    static std::vector<tuple<int, int> > build_work;
     static std::vector<tuple<int, int> > locks;
     static char buffer[262144];
     std::vector<char*> mems;
@@ -84,33 +85,6 @@ struct xmem {
         assert(base_buffer_size==buffer_size);
         redo_size = 0;
     }
-    inline void * build() {
-        assert(!locks.empty());
-        int base_buffer_size = std::get<0>(locks.back());
-        int sz = (buffer_size-base_buffer_size)+redo_size+4;
-        char * ret = alloc(sz);
-        *(unsigned int*)ret = sz;
-        char * p = ret + 4;
-        while(base_buffer_size<buffer_size) {
-            buffer_size -= 4;
-            int pos = *(int*)(buffer+buffer_size);
-            *(int*)p = pos;
-            p += 4;
-            buffer_size -= 2;
-            int size = *(unsigned short*)(buffer+buffer_size);
-            *(unsigned short*)p = size;
-            p += 2;
-            std::memcpy(p, base_ptr+pos, size);
-            p += size;
-            buffer_size -= size;
-            std::memcpy(p, buffer+buffer_size, size);
-            p += size;
-        }
-        assert(base_buffer_size==buffer_size);
-        assert(p==ret+sz);
-        redo_size = 0;
-        return ret;
-    }
     static inline void undo(void * patch) {
         assert(patch);
         char * p = (char*)patch;
@@ -128,6 +102,86 @@ struct xmem {
             p += size;
         }
         assert(p==ep);
+    }
+    inline void * build_undo() {
+        //*
+        assert(!locks.empty());
+        int base_buffer_size = std::get<0>(locks.back());
+        int bs = buffer_size;
+        assert(build_work.empty());
+        while(base_buffer_size<bs) {
+            bs -= 4;
+            int pos = *(int*)(buffer+bs);
+            bs -= 2;
+            int size = *(unsigned short*)(buffer+bs);
+            bs -= size;
+            build_work.emplace_back(pos, size);
+        }
+        int total_size = 0;
+        if(!build_work.empty()) {
+            std::sort(build_work.begin(), build_work.end());
+            {
+                int j=0;
+                int block_pos = get<0>(build_work[0]);
+                int block_end = block_pos + get<1>(build_work[0]);
+                for(int i=1; i<build_work.size(); ++i) {
+                    int next_block_pos = get<0>(build_work[i]);
+                    int next_block_end = next_block_pos + get<1>(build_work[i]);
+                    if(next_block_pos<=block_end+16) {
+                        block_end = max(block_end, next_block_end);
+                    }
+                    else {
+                        int block_size = block_end - block_pos;
+                        assert(block_size<65536);
+                        get<0>(build_work[j]) = block_pos;
+                        get<1>(build_work[j]) = block_size;
+                        total_size += block_size;
+                        ++j;
+                        block_pos = next_block_pos;
+                        block_end = next_block_end;
+                    }
+                }
+                {
+                    int block_size = block_end - block_pos;
+                    assert(block_size<65536);
+                    get<0>(build_work[j]) = block_pos;
+                    get<1>(build_work[j]) = block_size;
+                    total_size += block_size;
+                }
+                build_work.resize(j+1);
+            }
+        }
+        int sz = (int)build_work.size() * 6 + total_size + total_size + 4;
+        char * ret = alloc(sz);
+        *(unsigned int*)ret = sz;
+        char * p = ret + 4;
+        for(int i=0; i<build_work.size(); ++i) {
+            int pos = get<0>(build_work[i]);
+            int size = get<1>(build_work[i]);
+            *(int*)p = pos;
+            p += 4;
+            *(unsigned short*)p = size;
+            p += 2;
+            std::memcpy(p, base_ptr+pos, size);
+            p += size + size;
+        }
+        undo();
+        p = ret + 4;
+        for(int i=0; i<build_work.size(); ++i) {
+            int pos = get<0>(build_work[i]);
+            int size = get<1>(build_work[i]);
+            p += 6 + size;
+            std::memcpy(p, base_ptr+pos, size);
+            p += size;
+        }
+        assert(p==ret+sz);
+        build_work.clear();
+        return ret;
+    }
+    inline void * build() {
+        void * ret = build_undo();
+        redo(ret);
+        return ret;
     }
     static inline void redo(void * patch) {
         //UNDO時の順番とREDO時の順番は逆だが、REDOデータはbuild時に作られるため、どの順番で実行されても問題ない。
@@ -153,6 +207,7 @@ char * xmem::base_ptr = 0;
 int xmem::buffer_size = 0;
 int xmem::redo_size = 0;
 std::vector<std::tuple<int, int> > xmem::locks;
+std::vector<std::tuple<int, int> > xmem::build_work;
 char xmem::buffer[262144];
 
 inline void xmem_lock() {
