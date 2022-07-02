@@ -233,6 +233,8 @@ def getMinMaxValueExpr(ty, upper_flag):
     }
     if str(ty) in ['double']:
         context.appendInclude('cfloat')
+    if isinstance(ty, Template) and ty.name=='tuple':
+        return '%s(%s)' % (ty, ', '.join([getMinMaxValueExpr(arg, upper_flag) for arg in ty.args]))
     return UPPER[str(ty)] if upper_flag else LOWER[str(ty)]
 
 
