@@ -1430,17 +1430,22 @@ class node_funcdef(base_node):
         decorators = self.getDecorators()
         memo = decorators.get('memo', [None])[0]
         beam = decorators.get('beam', [None])[0]
+        beam_po = decorators.get('beam_po', [None])[0]
         sa_dac = decorators.get('sa_dac', [None])[0]
         penalty_hashes = {kv['varname'].name: str(kv['function']) if 'function' in kv else None for (v, kv) in decorators.get('penalty_hash', []) if isinstance(kv.get('varname'), node_var)}
         xheu_type = None
         xheu = None
         if beam is not None:
             xheu, xheu_type = beam, 'beam'
+        elif beam_po is not None:
+            xheu, xheu_type = beam_po, 'beam_po'
         elif sa_dac is not None:
             xheu, xheu_type = sa_dac, 'sa_dac'
         if memo is not None or xheu is not None:
             func_name = '%s$origin' % (self.name, )
             if xheu_type == 'beam':
+                assert self.return_type is None
+            if xheu_type == 'beam_po':
                 assert self.return_type is None
             if xheu_type == 'sa_dac':
                 assert str(self.return_type) == 'float'
@@ -1511,10 +1516,16 @@ class node_funcdef(base_node):
             maxwidth = xheu[1].get('maxwidth', None)
             timelimit = xheu[1].get('timelimit', None)
             verbose = xheu[1].get('verbose', None)
+            avg_bonus_rate = xheu[1].get('avg_bonus_rate', None)
+            stdev_bonus_rate = xheu[1].get('stdev_bonus_rate', None)
+            ucb_bonus_rate = xheu[1].get('ucb_bonus_rate', None)
             visitclear = xheu[1].get('visitclear', None)
             if xheu_type == 'beam':
                 context.appendInclude('xbeam.h')
                 context.print('xbeam %s$so;' % (self.name, ))
+            if xheu_type == 'beam_po':
+                context.appendInclude('xbeam_po.h')
+                context.print('xbeam_po %s$so;' % (self.name, ))
             elif xheu_type == 'sa_dac':
                 context.appendInclude('xsa_dac.h')
                 context.print('xsa_dac %s$so;' % (self.name, ))
@@ -1576,7 +1587,10 @@ class node_funcdef(base_node):
                     context.print('if(%s) %s$visited.clear();' % (visitclear, self.name))
                     context.dedent()
                     context.print('}')
-                context.print('if(%s$visited.testWithSet(%s)) continue;' % (self.name, param.name))
+                if xheu_type == 'beam_po':
+                    context.print('if(%s$visited.testWithSet(%s) && %s$so.skip()) continue;' % (self.name, param.name, self.name))
+                else:
+                    context.print('if(%s$visited.testWithSet(%s)) continue;' % (self.name, param.name))
             if penalty_hash_flag and 'score' in [param.name for param in self.parameters]:
                 for param in self.parameters:
                     if param.name in penalty_hashes:
@@ -1594,7 +1608,10 @@ class node_funcdef(base_node):
             context.indent()
             context.print('if(%s$lock) {' % (self.name, ))
             context.indent()
-            context.print('if(%s$so.reserve(%s)) {' % (self.name, 'score' if 'score' in [param.name for param in self.parameters] else '0'))
+            if xheu_type == 'beam_po' and 'score0' in [param.name for param in self.parameters]:
+                context.print('if(%s$so.reserve(%s, score0)) {' % (self.name, 'score' if 'score' in [param.name for param in self.parameters] else 'score0'))
+            else:
+                context.print('if(%s$so.reserve(%s)) {' % (self.name, 'score' if 'score' in [param.name for param in self.parameters] else '0'))
             context.indent()
             for param in self.parameters:
                 context.print('%s$so.%s(%s);' % (self.name, paramTypeMethodDic[str(param.ty)], param.name))
@@ -1607,17 +1624,15 @@ class node_funcdef(base_node):
             context.print('%s$lock = true;' % (self.name, ))
             for clear_with_init in clear_with_inits:
                 context.print('%s.clear();' % (clear_with_init, ))
-            context.print('%s$so.init((%s)+1, %s, %s);' % (self.name, maxdepth, timelimit, maxwidth))
+            context.print('%s$so.init(%s, %s, %s);' % (self.name, maxdepth, timelimit, maxwidth))
             if visitclear is not None:
                 context.print('%s$remain_depth = (%s)+1;' % (self.name, maxdepth))
             if verbose is not None:
                 context.print('%s$so.setVerbose(%s);' % (self.name, verbose))
-            context.print('if(%s$so.reserve(%s)) {' % (self.name, 'score' if 'score' in [param.name for param in self.parameters] else '0'))
-            context.indent()
-            for param in self.parameters:
-                context.print('%s$so.%s(%s);' % (self.name, paramTypeMethodDic[str(param.ty)], param.name))
-            context.dedent()
-            context.print('}')
+            if xheu_type == 'beam_po' and (avg_bonus_rate is not None or stdev_bonus_rate is not None or ucb_bonus_rate is not None):
+                context.print('%s$so.setBonusRates(%s, %s, %s);' % (self.name, avg_bonus_rate or 0, stdev_bonus_rate or 0, ucb_bonus_rate or 0))
+            context.print('%s$origin(%s);' % (
+                self.name, ', '.join(param.name for param in self.parameters)))
             context.print('%s$loop();' % (self.name, ))
             context.print('%s$lock = false;' % (self.name, ))
             context.dedent()

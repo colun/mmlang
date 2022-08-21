@@ -10,6 +10,7 @@ import lark.indenter
 import json
 from . import mmcore
 import concurrent.futures
+from . import threadpool
 import re
 import colorama
 import hashlib
@@ -30,6 +31,9 @@ class MyIndenter(lark.indenter.Indenter):
     CLOSE_PAREN_types = ['RPAR', 'RSQB', 'RBRACE', 'GREATER']
 
 parser = lark.Lark(grammer, parser='lalr', postlex=MyIndenter(), propagate_positions=True)
+
+executor = threadpool.ThreadPool()
+compile_tasks = []
 
 def expand(node):
     if isinstance(node, lark.Token):
@@ -91,6 +95,28 @@ def compile_raw(args):
         print('%s: %s' % (info[0].__name__, info[1]))
 
 
+def test_exec_atcoder(args, url, task_dir, main_id):
+    open(os.path.join(task_dir, f'main{main_id}.cpp'), 'w').write(open(args.output_path, 'r').read())
+    output_lines = []
+    output_lines.append(f' === {args.target_path} ( {url} ) ===')
+    submission_url = None
+    ret_kind = -1
+    ret = subprocess.run(['atcoder-tools', 'compile', '--compile-command', f'g++ -std=gnu++14 -DMM\\$DBG -DMM\\$LOCAL -DMM\\$TEST -O2 main{main_id}.cpp -o main{main_id}'], cwd=task_dir, stderr=subprocess.PIPE)
+    output_lines.append(ret.stderr.decode())
+    if ret.returncode==0:
+        ret_kind = 0
+        if args.ac_test:
+            ret = subprocess.run(['atcoder-tools', 'test', '--exec', f'./main{main_id}'], cwd=task_dir, stderr=subprocess.PIPE)
+        elif args.ac_submit:
+            ret = subprocess.run(['atcoder-tools', 'submit', '--code', f'main{main_id}.cpp', '--exec', f'./main{main_id}'] + (['-u'] if args.ac_submit2 else []), cwd=task_dir, stderr=subprocess.PIPE)
+        output_lines.append(ret.stderr.decode())
+        m = re.search(r'https://[\.\-/\w]+/submissions/[\.\-/\w]+', ret.stderr.decode())
+        if m:
+            submission_url = m.group(0)
+        if ret.returncode==0:
+            ret_kind = 1
+    return output_lines, (args.target_path, url, ret_kind, submission_url)
+
 def test_atcoder(args):
     args.stdout_flag = False
     m = re.search(r'# *atcoder *: *(https://[\-\w\./]*)', args.source)
@@ -129,24 +155,8 @@ def test_atcoder(args):
                     continue
                 url = f'https://atcoder.jp/contests/{metadata["problem"]["contest"]["contest_id"]}/tasks/{metadata["problem"]["problem_id"]}'
             assert metadata['code_filename']=='main.cpp'
-            open(os.path.join(task_dir, 'main.cpp'), 'w').write(open(args.output_path, 'r').read())
-            print(f' === {args.target_path} ( {url} ) ===')
-            submission_url = None
-            ret_kind = -1
-            ret = subprocess.run(['atcoder-tools', 'compile', '--compile-command', 'g++ -std=gnu++14 -DMM\\$DBG -DMM\\$LOCAL -DMM\\$TEST -O2 main.cpp -o main'], cwd=task_dir)
-            if ret.returncode==0:
-                ret_kind = 0
-                if args.ac_test:
-                    ret = subprocess.run(['atcoder-tools', 'test'], cwd=task_dir, stderr=subprocess.PIPE)
-                elif args.ac_submit:
-                    ret = subprocess.run(['atcoder-tools', 'submit'] + (['-u'] if args.ac_submit2 else []), cwd=task_dir, stderr=subprocess.PIPE)
-                print(ret.stderr.decode())
-                m = re.search(r'https://[\.\-/\w]+/submissions/[\.\-/\w]+', ret.stderr.decode())
-                if m:
-                    submission_url = m.group(0)
-                if ret.returncode==0:
-                    ret_kind = 1
-            args.ac_results.append((args.target_path, url, ret_kind, submission_url))
+            compile_tasks.append(executor.submit(test_exec_atcoder, args, url, task_dir, f'{len(compile_tasks)}'))
+
 
 
 def download(url, dst):
@@ -240,7 +250,6 @@ def test(args):
         cur.execute('insert into runs(name, source, created_at) values (?, ?, ?)', (args.test_name, args.source, created_at))
         run_id = cur.lastrowid
         print(f'run_id: {run_id}, created_at: {created_at}')
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         def exec_test(test_id, in_path):
             score = 0
             start_time = time.time()
@@ -260,7 +269,7 @@ def test(args):
         tasks = [executor.submit(exec_test, test_id, tests[test_id]) for test_id in test_ids]
         scores = []
         for task in tasks:
-            test_id, score, sec, result_stdout, result_stderr = task.result()
+            test_id, score, sec, result_stdout, result_stderr = executor.result(task)
             scores.append(score)
             print('%d/%d\r' % (len(scores), len(tasks)), end='')
             cur.execute('insert into scores(run_id, test_id, score) values (?, ?, ?)', (run_id, test_id, score))
@@ -445,7 +454,6 @@ def main():
     arggroup.add_argument('--ac-submit2', action='store_true', help='unlock safety submit using atcoder-tools')
     args = parser.parse_args()
 
-    args.ac_results = []
     args.stdout_flag = None
     if args.test_size is not None or args.test_seed is not None:
         args.test = True
@@ -475,8 +483,6 @@ def main():
                 return colorama.Style.BRIGHT + colorama.Fore.GREEN + 'SUCCESS' + colorama.Style.RESET_ALL
             else:
                 assert False
-        for target_path, task_url, success, submission_url in args.ac_results:
-            print('%s ( %s ) ... %s%s' % (target_path, task_url,  getSuccessString(success), '' if submission_url is None else f' {submission_url}'))
     else:
         args.folder_mode = False
         output_path = args.output
@@ -485,6 +491,14 @@ def main():
             output_path = os.path.join(output_path, name + '.cpp')
         args.stdout_flag = output_path is None
         compile_file(origin_outs, args.target, output_path, args)
+    ac_results = []
+    for compile_task in compile_tasks:
+        output_lines, ac_result = executor.result(compile_task)
+        for output_line in output_lines:
+            print(output_line)
+        ac_results.append(ac_result)
+    for target_path, task_url, success, submission_url in ac_results:
+        print('%s ( %s ) ... %s%s' % (target_path, task_url,  getSuccessString(success), '' if submission_url is None else f' {submission_url}'))
 
 
 if __name__ == '__main__':

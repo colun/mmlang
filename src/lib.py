@@ -116,6 +116,7 @@ dependency = {
     'fast_pque.h': ['cassert', 'fast_array.h'],
     'fast_pque_vk.h': ['cassert', 'fast_array.h'],
     'xbeam.h': ['get_time.h', 'fast_pool.h', 'dpque.h', 'xmem.h', 'xnodemem.h'],
+    'xbeam_po.h': ['cfloat', 'get_time.h', 'fast_pool.h', 'dpque.h', 'xmem.h', 'xnodemem.h'],
     'lrand49.h': ['mrand49.h', 'asm_mul_hi.h'],
     'drand49.h': ['mrand49.h'],
     'mrand49.h': ['asm_mul_hi.h'],
