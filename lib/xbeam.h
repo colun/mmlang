@@ -47,9 +47,9 @@ struct xbeam {
     xbeam$node * current_node;
     xbeam$node * next_node = NULL;
     typedef std::pair<double, xbeam$node*> ranking_item;
-    typedef dpque<ranking_item> ranking;
-    ranking * current_ranking = NULL;
-    ranking * next_ranking = NULL;
+    typedef dpque<ranking_item> ty_ranking;
+    ty_ranking * current_ranking = NULL;
+    ty_ranking * next_ranking = NULL;
     char * input_mem = 0;
     xnodemem nmem;
     double nextLimit;
@@ -69,7 +69,7 @@ struct xbeam {
     void setVerbose(bool flag) {
         verboseFlag = flag;
     }
-    void clear_ranking(ranking * rnk) {
+    void clear_ranking(ty_ranking * rnk) {
         for(const ranking_item & v : *rnk) {
             v.second->release();
         }
@@ -89,23 +89,24 @@ struct xbeam {
         wholeLimit = timeLimit;
         {
             double t = getTime();
-            nextLimit = (wholeLimit - t) / remain_depth + t;
+            nextLimit = (wholeLimit - t) / (remain_depth + 1) + t;
             infoDepthStartTime = infoStartTime = t;
         }
         nmem.free2();
         nmem.free2();
+        assert(next_node==NULL);
         current_node = xbeam$node::create();
         if(current_ranking) {
             clear_ranking(current_ranking);
         }
         else {
-            current_ranking = new ranking();
+            current_ranking = new ty_ranking();
         }
         if(next_ranking) {
             clear_ranking(next_ranking);
         }
         else {
-            next_ranking = new ranking();
+            next_ranking = new ty_ranking();
         }
         xmem::lock();
     }
@@ -136,6 +137,7 @@ struct xbeam {
         assert(next_node);
         assert(next_node->patch==0);
         assert(next_node->parent!=0);
+        assert(current_node!=next_node);
         next_node = next_node->parent;
         std::vector<void*> vec;
         while(current_node!=next_node) {
@@ -214,10 +216,10 @@ struct xbeam {
             clear_ranking(current_ranking);
             std::swap(current_ranking, next_ranking);
             nmem.free2();
-        }
-        if(current_ranking->empty()) {
-            dest_(t);
-            return false;
+            if(current_ranking->empty()) {
+                dest_(t);
+                return false;
+            }
         }
         //最初に、ビームの中から次の候補を取り出す。
         next_node = current_ranking->large().second;
