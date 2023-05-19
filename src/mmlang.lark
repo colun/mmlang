@@ -27,6 +27,8 @@ referencedtype: "&" test
 !assign_op: "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" | "**=" | "//=" | "<?=" | ">?="
 mod: "mod" test
 
+?if_suffix: tuple ["if" test]
+
 ?tuple: instant ("," instant)* [","]
 ?noinstant_tuple: bit_or ("," bit_or)* [","]
 instant: test (instant_op [test])* | (instant_op [test])+
@@ -71,7 +73,7 @@ bit_not: "~" prefix
        | post_dec
        | atom
 
-funccall: suffix "(" [tuple] ")"
+funccall: suffix "(" [if_suffix] ")"
 getitem: suffix "[" assign "]"
 template: suffix "!" "(" [tuple] ")"
 getattr: suffix "." var

@@ -318,9 +318,17 @@ struct xbeam_po {
                     if(node->change()) {
                         assert(node->score_diff_count==1);
                         assert(node->depth<rankings.size());
-                        node->addRef();
-                        assert(node->input);
-                        rankings[node->depth].emplace(node->getScore(), node);
+                        double score = node->getScore();
+                        ty_ranking & ranking = rankings[node->depth];
+                        if(ranking.size()<max_beam_size || ranking.small().first<score) {
+                            if(max_beam_size<=ranking.size()) {
+                                ranking.small().second->release();
+                                ranking.pop_small();
+                            }
+                            node->addRef();
+                            assert(node->input);
+                            ranking.emplace(score, node);
+                        }
                     }
                 }
                 node = node->parent;
@@ -335,9 +343,13 @@ struct xbeam_po {
                 if(node->change()) {
                     assert(2<=node->score_diff_count);
                     assert(node->depth<rankings.size());
-                    node->addRef();
-                    assert(node->input);
-                    rankings[node->depth].emplace(node->getScore(), node);
+                    double score = node->getScore();
+                    ty_ranking & ranking = rankings[node->depth];
+                    if(ranking.size()<max_beam_size || ranking.small().first<score) {
+                        node->addRef();
+                        assert(node->input);
+                        ranking.emplace(score, node);
+                    }
                 }
             }
         }

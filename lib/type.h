@@ -10,3 +10,5 @@ typedef __int128 int128;
 typedef unsigned char uchar;
 typedef unsigned short ushort;
 typedef unsigned int uint;
+typedef float float32;
+typedef double float64;

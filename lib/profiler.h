@@ -13,6 +13,7 @@ struct MM$Profiler {
         signal(SIGINT, MM$SignalHandler);
         signal(SIGSEGV, MM$SignalHandler);
         signal(SIGABRT, MM$SignalHandler);
+        signal(SIGFPE, MM$SignalHandler);
         continue_flag = true;
         th = std::thread([&] {
             total_count = 0;
@@ -45,7 +46,9 @@ struct MM$Profiler {
                 fprintf(stderr, "%5d: %7.3f%%\n", get<0>(v), p);
             }
         }
-        fprintf(stderr, "Other: %7.3f%%\n", (100.0 * other) / total_count);
+        if(other) {
+            fprintf(stderr, "Other: %7.3f%%\n", (100.0 * other) / total_count);
+        }
     }
 };
 MM$Profiler MM$profiler;

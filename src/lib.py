@@ -26,6 +26,8 @@ func_definition = {
     'int64': ('long long', None),
     'int128': ('__int128', None),
     'float': ('double', None),
+    'float32': ('float', None),
+    'float64': ('double', None),
     'string': ('string', 'string'),
     'container_pop': (None, 'container_pop.h'),
     'container_shift': (None, 'container_shift.h'),
@@ -79,6 +81,12 @@ func_definition = {
     'xmem_unlock': (None, 'xmem.h'),
     'xmem_undo': (None, 'xmem.h'),
     'usleep': (None, 'unistd.h'),
+    'addresser2d': ('addresser2d', 'addresser2d.h'),
+    'encode_float18': (None, 'encode_float18.h'),
+    'decode_float18': ('float', 'decode_float18.h'),
+    'store2d': (None, 'store2d.h'),
+    'rng49': ('rng49', 'rng49.h'),
+    'gvRGB': ('gvRGB', 'gv.h'),
 }
 dependency = {
     'input_c_line_or_word.h': ['cassert', 'cstdio', 'cstring'],
@@ -132,10 +140,37 @@ dependency = {
     'modint.h': ['mod_mul.h'],
     'binary_file.h': ['cassert', 'cstdio', 'cstring'],
     'thread_pool.h': ['cassert', 'vector', 'deque', 'thread', 'mutex', 'functional'],
+    'store2d.h': ['cstdio', 'sys/stat.h', 'param_str.h', 'encode_float18.h', 'addresser2d.h'],
+    'rng49.h': ['cassert', 'asm_mul_hi.h'],
+    'EulerTourTree.h': ['cassert', 'utility', 'unordered_map', 'fast_pool.h'],
 }
 nocompress = set([
 ])
 class_definition = {
+    'EulerTourTree': ({
+        'is_connected': 'bool',
+        'is_direct_connected': 'bool',
+        'link': None,
+        'cut': None,
+        'size': int,
+    }, 'EulerTourTree.h'),
+    'mutate_counter': ({
+        'accept': None,
+        'reject': None,
+        'debug': None,
+    }, 'mutate_counter.h'),
+    'rng49': ({
+        'srand49': None,
+        'mrand49': 'int',
+        'mmrand49': 'long long',
+        'lrand49': 'int',
+        'drand49': 'double',
+    }, 'rng49.h'),
+    'bitset': ({
+        'set': None,
+        'reset': None,
+        'test': 'bool',
+    }, 'bitset'),
     'vector': ({
         'assign': None,
         'at': '$1',
@@ -189,6 +224,8 @@ class_definition = {
     }, 'array'),
     'priority_queue': ({
     }, 'queue'),
+    'PriorityQueue': ({
+    }, 'PriorityQueue.h'),
     'queue': ({
     }, 'queue'),
     'xarray': ({
@@ -196,6 +233,7 @@ class_definition = {
         '__getitem__': '$1',
     }, 'xarray.h'),
     'xvector': ({
+        'back': '$1',
         'size': 'int',
         'empty': 'bool',
         '__getitem__': '$1',
@@ -222,6 +260,13 @@ class_definition = {
     }, 'dpque.h'),
     'xvar': ({
     }, 'xvar.h'),
+    'addresser2d': ({
+        'begin': 'int',
+        'end': 'int',
+        'stride': 'int',
+        'fin': 'int',
+        'toPos': 'int',
+    }, 'addresser2d.h'),
     'fast_pque': ({
         'size': 'int',
         '__getitem__': '$1',
