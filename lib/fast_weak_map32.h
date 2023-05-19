@@ -1,8 +1,7 @@
 template<class T, int N=65536>class fast_weak_map32 {
 private:
     const int mask = N - 1;
-    fast_array<unsigned short, N> memo;
-    fast_array<tuple<unsigned short, T>, N> values;
+    fast_array<tuple<unsigned short, T>, N> memo;
 public:
     inline void clear() {
         memset(memo.data(), 0, sizeof(memo));

@@ -16,6 +16,8 @@ import colorama
 import hashlib
 import copy
 import time
+import random
+from . import mmhttpd
 
 __version__ = open(os.path.join(os.path.dirname(__file__), '..', 'version.txt')).read()
 
@@ -32,7 +34,7 @@ class MyIndenter(lark.indenter.Indenter):
 
 parser = lark.Lark(grammer, parser='lalr', postlex=MyIndenter(), propagate_positions=True)
 
-executor = threadpool.ThreadPool()
+executor = None
 compile_tasks = []
 
 def expand(node):
@@ -70,10 +72,14 @@ def compile_raw(args):
         print('#else')
         print('#define __test__ false')
         print('#endif')
+        if args.pybind11:
+            print('#define __pybind11__ true')
+        else:
+            print('#define __pybind11__ false')
         print()
         tree = parser.parse(args.source)
         tree = expand(tree)
-        tree.start(args.profiler)
+        tree.start(args.source_name, args.profiler, args.pybind11)
     except Exception as e:
         info = sys.exc_info()
         #sys.excepthook(*info)
@@ -178,13 +184,23 @@ def downloads(args):
         download(m.group(1), os.path.join(args.cwd, m.group(2)))
 
 
+def sub_run(cmd):
+    return subprocess.run(cmd.split(' '), stdout=subprocess.PIPE).stdout.decode().rstrip()
+
+
 def build(args):
     if hasattr(args, 'build_success'):
         return args.build_success
-    args.aout = os.path.join(args.cwd, 'a.out')
+    options = []
+    if args.pybind11:
+        args.aout = os.path.join(args.cwd, args.source_name + sub_run('python3-config --extension-suffix'))
+        options.append('-shared')
+        options.append('-fPIC')
+        options.extend(sub_run('python3 -m pybind11 --includes').split(' '))
+    else:
+        args.aout = os.path.join(args.cwd, 'a.out')
     if os.path.exists(args.aout):
         os.remove(args.aout)
-    options = []
     options.append('-DMM$LOCAL')
     if args.debug:
         options.append('-DMM$DBG')
@@ -201,9 +217,56 @@ def build(args):
     return args.build_success
 
 
+def splitCommand(command):
+    ret = []
+    quot = None
+    esc = False
+    last = ''
+    must = False
+    st = 0
+    for i in range(len(command)):
+        c = command[i]
+        if quot is None:
+            if c in " \t":
+                if st!=i:
+                    last += command[st:i]
+                st = i + 1
+                if 1<=len(last) or must:
+                    ret.append(last)
+                    last = ''
+                    must = False
+            elif c in '\'"':
+                if st!=i:
+                    last += command[st:i]
+                st = i + 1
+                quot = c
+        else:
+            if esc:
+                if c=='n':
+                    last += '\n'
+                elif c=='t':
+                    last += '\t'
+                else:
+                    last += c
+                st = i + 1
+                esc = False
+            elif c=='\\':
+                last += command[st:i]
+                esc = True
+            elif c==quot:
+                last += command[st:i]
+                must = True
+                st = i + 1
+                quot = None
+    last += command[st:]
+    if 1<=len(last) or must:
+        ret.append(last)
+    return ret
+
+
 def test(args):
     m = re.search(r'# *command *: *(.+)', args.source)
-    command = m.group(1).replace('{$AOUT}', './a.out') if m else None
+    command = m.group(1) if m else None
     m = re.search(r'# *in_dir *: *(.+)', args.source)
     in_dir = m.group(1) if m else None
     tests = None
@@ -221,7 +284,8 @@ def test(args):
             os.remove('result.gv')
         seed = tests[args.test_seed] if tests else args.test_seed
         if command:
-            subprocess.run(command.replace('{$SEED}', str(seed)).split(' '), cwd=args.cwd)
+            commands = [cmd.replace('{$SEED}', str(seed)).replace('{$AOUT}', f'./a.out --seed {seed}') for cmd in splitCommand(command)]
+            subprocess.run(commands, cwd=args.cwd)
         else:
             subprocess.run(['./a.out'], stdin=open(tests[args.test_seed]), cwd=args.cwd)
         if os.path.exists('result.gv'):
@@ -230,31 +294,29 @@ def test(args):
             subprocess.run(['java', '-jar', gvc_path, 'result.gv'])
     else:
         if tests is None:
-            test_size = int(args.test_size) if args.test_size is not None else 100
-            tests = {i: str(test_size + i) for i in range(test_size)}
-        max_workers = args.workers
-        if max_workers is None:
-            import psutil
-            max_workers = max(1, psutil.cpu_count(logical=False) - 1)
-        import sqlite3
-        import datetime
-        created_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        db = sqlite3.connect('mm.sqlite3')
-        cur = db.cursor()
-        cur.execute('create table if not exists runs(run_id integer not null primary key autoincrement, name text null, source text null, created_at text)')
-        cur.execute('create table if not exists scores(run_id integer, test_id integer, score real)')
-        cur.execute('create index if not exists scores_run on scores(run_id, test_id)')
-        cur.execute('create index if not exists scores_test on scores(test_id, run_id)')
-        cur.execute('create table if not exists results(run_id integer, test_id integer, sec real, stdout text, stderr text, gv text null)')
-        cur.execute('create index if not exists results_run on results(run_id, test_id)')
-        cur.execute('insert into runs(name, source, created_at) values (?, ?, ?)', (args.test_name, args.source, created_at))
-        run_id = cur.lastrowid
-        print(f'run_id: {run_id}, created_at: {created_at}')
+            test_size = int(args.test_size) if args.test_size is not None else (100000 if args.test_random else (100 // executor.threads) * executor.threads)
+            if args.test_random:
+                tests = {i: str(random.randrange(1000000000, 2000000000)) for i in range(test_size)}
+            else:
+                tests = {i: str(10000 + i) for i in range(test_size)}
+        if not args.test_random:
+            import sqlite3
+            import datetime
+            created_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            db = sqlite3.connect('mm.sqlite3')
+            cur = db.cursor()
+            cur.execute('create table if not exists runs(run_id integer not null primary key autoincrement, name text null, source text null, created_at text)')
+            cur.execute('create table if not exists scores(run_id integer, test_id integer, score real)')
+            cur.execute('create table if not exists results(run_id integer, test_id integer, in_path text, sec real, stdout text, stderr text, gv text null)')
+            cur.execute('insert into runs(name, source, created_at) values (?, ?, ?)', (args.test_name, args.source, created_at))
+            run_id = cur.lastrowid
+            print(f'run_id: {run_id}, created_at: {created_at}')
         def exec_test(test_id, in_path):
             score = 0
             start_time = time.time()
             if command:
-                completed = subprocess.run(command.replace('{$SEED}', in_path).split(' '), cwd=args.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8')
+                commands = [cmd.replace('{$SEED}', in_path).replace('{$AOUT}', f'./a.out --seed {in_path}') for cmd in splitCommand(command)]
+                completed = subprocess.run(commands, cwd=args.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8')
             else:
                 completed = subprocess.run(['./a.out'], stdin=open(in_path), cwd=args.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8')
             sec = time.time() - start_time
@@ -262,21 +324,23 @@ def test(args):
                 m = re.match(r'^[Ss]core *[:=] *([\d\.]+)', line)
                 if m:
                     score = float(m.group(1))
-            return test_id, score, sec, completed.stdout, completed.stderr
+            return test_id, in_path, score, sec, completed.stdout, completed.stderr
         test_ids = sorted(tests.keys())
         if args.test_size is not None:
             test_ids = test_ids[:args.test_size]
         tasks = [executor.submit(exec_test, test_id, tests[test_id]) for test_id in test_ids]
         scores = []
         for task in tasks:
-            test_id, score, sec, result_stdout, result_stderr = executor.result(task)
+            test_id, in_path, score, sec, result_stdout, result_stderr = executor.result(task)
             scores.append(score)
             print('%d/%d\r' % (len(scores), len(tasks)), end='')
-            cur.execute('insert into scores(run_id, test_id, score) values (?, ?, ?)', (run_id, test_id, score))
-            cur.execute('insert into results(run_id, test_id, sec, stdout, stderr, gv) values (?, ?, ?, ?, ?, ?)', (run_id, test_id, sec, result_stdout, result_stderr, None))
+            if not args.test_random:
+                cur.execute('insert into scores(run_id, test_id, score) values (?, ?, ?)', (run_id, test_id, score))
+                cur.execute('insert into results(run_id, test_id, in_path, sec, stdout, stderr, gv) values (?, ?, ?, ?, ?, ?, ?)', (run_id, test_id, in_path, sec, result_stdout, result_stderr, None))
         print('score: %f %s' % (sum(scores) / len(scores), scores))
-        db.commit()
-        db.close()
+        if not args.test_random:
+            db.commit()
+            db.close()
 
 
 def run(args):
@@ -304,6 +368,7 @@ def compile_file(origin_outs, target_path, output_path, args):
     args = copy.copy(args)
     args.output_path = output_path
     args.target_path = target_path
+    args.source_name = os.path.basename(target_path).split('.')[0]
     args.source = open(target_path).read()
     if args.folder_mode:
         args.cwd = os.path.join(WORK_DIR, 'work', hashlib.sha1(args.target_path.encode()).hexdigest())
@@ -428,14 +493,18 @@ def gen_atcoder(target_path):
 
 
 def main():
+    global executor
+
     import argparse
     parser = argparse.ArgumentParser(description='MM Language ' + __version__)
     parser.add_argument('target', metavar='SOURCE', help='source code file/folder')
     arggroup = parser.add_argument_group('build / run / test')
     arggroup.add_argument('--output', metavar='OUTPUT', help='output file/folder')
     arggroup.add_argument('--build', action='store_true', help='compile')
+    arggroup.add_argument('--pybind11', action='store_true', help='use pybind11')
     arggroup.add_argument('--run', action='store_true', help='compile + execute')
     arggroup.add_argument('--test', action='store_true', help='compile + test using `in` folder')
+    arggroup.add_argument('--test-random', action='store_true', help='compile + test using `in` folder ... random')
     arggroup.add_argument('--test-size', metavar='N', type=int, default=None, help='use N testcases in `in` folder')
     arggroup.add_argument('--test-seed', metavar='N', type=int, default=None, help='use only N-nd testcase in `in` folder')
     arggroup.add_argument('--test1', dest='test_seed', action='store_const', const=1, help='use only first testcase in `in` folder')
@@ -452,13 +521,25 @@ def main():
     arggroup.add_argument('--ac-submit', action='store_true', help='submit using atcoder-tools')
     arggroup.add_argument('--ac-submit-folder', action='store_true', help='folder submit using atcoder-tools')
     arggroup.add_argument('--ac-submit2', action='store_true', help='unlock safety submit using atcoder-tools')
+    arggroup.add_argument('--httpd', action='store_true', help='httpd')
     args = parser.parse_args()
 
+    if args.httpd:
+        return mmhttpd.main()
+
+    max_workers = args.workers
+    if max_workers is None:
+        import psutil
+        max_workers = max(1, psutil.cpu_count(logical=False) - 1)
+    executor = threadpool.ThreadPool(max_workers)
+
     args.stdout_flag = None
-    if args.test_size is not None or args.test_seed is not None:
+    if args.test_size is not None or args.test_seed is not None or args.test_random:
         args.test = True
     if args.ac_submit_folder or args.ac_submit2:
         args.ac_submit = True
+    if args.pybind11:
+        args.build = True
 
     origin_outs = sys.stdout, sys.stderr
     if args.ac_gen:
@@ -473,16 +554,6 @@ def main():
         assert not args.ac_submit or args.ac_submit_folder, '対象がフォルダの場合の--ac-submitは、代わりに--ac-submit-folderを使用してください'
         args.folder_mode = True
         compile_folder(origin_outs, args.target, args.output, args)
-
-        def getSuccessString(success):
-            if success==-1:
-                return colorama.Style.BRIGHT + colorama.Fore.RED + 'ERROR' + colorama.Style.RESET_ALL
-            elif success==0:
-                return colorama.Style.BRIGHT + colorama.Fore.YELLOW + 'FAILURE' + colorama.Style.RESET_ALL
-            elif success==1:
-                return colorama.Style.BRIGHT + colorama.Fore.GREEN + 'SUCCESS' + colorama.Style.RESET_ALL
-            else:
-                assert False
     else:
         args.folder_mode = False
         output_path = args.output
@@ -497,6 +568,15 @@ def main():
         for output_line in output_lines:
             print(output_line)
         ac_results.append(ac_result)
+    def getSuccessString(success):
+        if success==-1:
+            return colorama.Style.BRIGHT + colorama.Fore.RED + 'ERROR' + colorama.Style.RESET_ALL
+        elif success==0:
+            return colorama.Style.BRIGHT + colorama.Fore.YELLOW + 'FAILURE' + colorama.Style.RESET_ALL
+        elif success==1:
+            return colorama.Style.BRIGHT + colorama.Fore.GREEN + 'SUCCESS' + colorama.Style.RESET_ALL
+        else:
+            assert False
     for target_path, task_url, success, submission_url in ac_results:
         print('%s ( %s ) ... %s%s' % (target_path, task_url,  getSuccessString(success), '' if submission_url is None else f' {submission_url}'))
 

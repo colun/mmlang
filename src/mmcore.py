@@ -75,7 +75,7 @@ class Template:
 
 def testToStr(expr):
     ty = expr.getType()
-    if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'list', 'stack', 'queue', 'priority_queue', 'fast_pque', 'fast_pque_vk', 'set_pque', 'xpque', 'set', 'multiset']:
+    if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'list', 'stack', 'queue', 'priority_queue', 'PriorityQueue', 'fast_pque', 'fast_pque_vk', 'set_pque', 'xpque', 'set', 'multiset']:
         return '!%s.empty()' % (expr, )
     return str(expr)
 
@@ -161,6 +161,21 @@ class base_node:
         return False
 
 
+class node_if_suffix(base_node):
+
+    def __init__(self, meta, node_type, body, test):
+        self.meta = meta
+        self.node_type = node_type
+        self.body = body
+        self.test = test
+
+    def getChildNodes(self):
+        return [self.body, self.test]
+
+    def getType(self):
+        return self.body.getType()
+
+
 def isComprehensionType(ty0, ty1):
     if ty1 is None or ty0 == ty1:
         return True
@@ -170,9 +185,9 @@ def isComprehensionType(ty0, ty1):
         return True
     if ty0 != 'auto' and ty1 == 'auto':
         return True
-    if ty0 == 'double' and ty1 in ['double', 'float', 'unsigned long long', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
+    if ty0 in ['double', 'float64'] and ty1 in ['double', 'float', 'float64', 'float32', 'unsigned long long', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
         return True
-    if ty0 == 'float' and ty1 in ['float', 'unsigned long long', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
+    if ty0 in ['float', 'float32'] and ty1 in ['float', 'float32', 'unsigned long long', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
         return True
     if ty0 in ['__int128', 'int128'] and ty1 in ['__int128', 'int128', 'unsigned long long', 'uint64', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
         return True
@@ -267,6 +282,7 @@ def toStrBoundArg(containerTy, args, upper_flag):
 
 
 use_profiler = False
+use_pybind11 = False
 
 
 class CodeContext:
@@ -368,6 +384,7 @@ class Context:
     def __init__(self, parent=None, scopeLevel=0):
         self.code_context = CodeContext() if parent is None else parent.code_context
         self.is_main = (parent is None) if scopeLevel==0 else parent.is_main
+        self.pybind11_funcs = [] if parent is None else None
         self.instant = []
         self.instant_l_count = 0
         self.instant_c_count = 0
@@ -662,6 +679,12 @@ class Context:
     def pop_break(self, *args, **kargs):
         return self.code_context.pop_break(*args, **kargs)
 
+    def add_pybind11(self, func):
+        if self.parent is not None:
+            self.parent.add_pybind11(func)
+        else:
+            self.pybind11_funcs.append(func)
+
 
 context = None
 
@@ -810,11 +833,13 @@ class group_node(base_node):
                 context.print('%s %s;' % (typeToStr(ty), name))
         context = preContext
 
-    def start(self, profiler_flag):
+    def start(self, source_name, profiler_flag, pybind11_flag):
         global context
         global use_profiler
+        global use_pybind11
         context = Context(scopeLevel=0)
         use_profiler = profiler_flag
+        use_pybind11 = pybind11_flag
         if use_profiler:
             context.appendInclude('profiler.h')
         self.visit('visitInit')
@@ -831,12 +856,22 @@ class group_node(base_node):
         context.printBlank()
         self.visit('visitDefineFunc')
         context.printBlank()
-        context.print('int main(int mm$argc, const char * * mm$argv) {')
+        if use_pybind11:
+            context.appendInclude('pybind11/pybind11.h')
+            context.appendInclude('pybind11/stl.h')
+            context.print('PYBIND11_MODULE(%s, mm$pybind11) {' % (source_name, ))
+        else:
+            context.print('int main(int mm$argc, const char * * mm$argv) {')
         context.indent()
-        context.appendInclude('init_params.h')
-        context.print('mm$initParams(mm$argc, mm$argv);')
+        if use_pybind11:
+            for func_name in context.pybind11_funcs:
+                context.print('mm$pybind11.def("%s", &%s);' % (func_name, func_name))
+        else:
+            context.appendInclude('init_params.h')
+            context.print('mm$initParams(mm$argc, mm$argv);')
         self.suite()
-        context.print('return 0;')
+        if not use_pybind11:
+            context.print('return 0;')
         context.dedent()
         context.print('}')
         for inc in context.getUsedIncludes():
@@ -963,7 +998,12 @@ class group_node(base_node):
                     context.indent()
                 expr = info
                 if expr.isAggregateFunc():
-                    ty = expr.args[0].getType()
+                    arg = expr.args[0]
+                    test = None
+                    if isinstance(arg, node_if_suffix):
+                        test = arg.test
+                        arg = arg.body
+                    ty = arg.getType()
                     init_value = '0'
                     func_name = str(expr.func)
                     if func_name == 'min':
@@ -988,27 +1028,29 @@ class group_node(base_node):
                         context.print('%s %s = %s;' % (ty, name, init_value))
                     if func_name == 'mean':
                         context.print('int %s$cnt = 0;' % (name, ))
-                    visitTopologicalUseBind(expr.args[0])
+                    visitTopologicalUseBind(arg)
                     context.pushInstantSymbols()
                     nest_count2 = self.processInstant()
+                    if test is not None:
+                        context.print0('if(%s) ' % (test, ))
                     if func_name == 'min':
-                        context.print('if(%s<%s) %s = %s;' % (expr.args[0], name, name, expr.args[0]))
+                        context.print('if(%s<%s) %s = %s;' % (arg, name, name, arg))
                     elif func_name == 'max':
-                        context.print('if(%s<%s) %s = %s;' % (name, expr.args[0], name, expr.args[0]))
+                        context.print('if(%s<%s) %s = %s;' % (name, arg, name, arg))
                     elif func_name == 'count_trues':
-                        context.print('if(%s) ++%s;' % (expr.args[0], name))
+                        context.print('if(%s) ++%s;' % (arg, name))
                     elif func_name == 'count_changes':
-                        context.print('{ %s %s$d = %s; if(!%s || %s$c!=%s$d) { ++%s; %s$c = %s$d; } }' % (ty, name, expr.args[0], name, name, name, name, name, name))
+                        context.print('{ %s %s$d = %s; if(!%s || %s$c!=%s$d) { ++%s; %s$c = %s$d; } }' % (ty, name, arg, name, name, name, name, name, name))
                     elif func_name == 'any':
-                        context.print('if(%s) { %s = true; break; }' % (expr.args[0], name))
+                        context.print('if(%s) { %s = true; break; }' % (arg, name))
                     elif func_name == 'all':
-                        context.print('if(!(%s)) { %s = false; break; }' % (expr.args[0], name))
+                        context.print('if(!(%s)) { %s = false; break; }' % (arg, name))
                     elif func_name == 'sum':
-                        context.print('%s += %s;' % (name, expr.args[0]))
+                        context.print('%s += %s;' % (name, arg))
                     elif func_name == 'mean':
-                        context.print('{ %s += %s; ++%s$cnt; }' % (name, expr.args[0], name))
+                        context.print('{ %s += %s; ++%s$cnt; }' % (name, arg, name))
                     elif func_name in ['median', 'count_uniques']:
-                        context.print('%s$c.push_back(%s);' % (name, expr.args[0]))
+                        context.print('%s$c.push_back(%s);' % (name, arg))
                     self.closeNest(nest_count2)
                     context.popInstantSymbols()
                     if func_name == 'mean':
@@ -1256,10 +1298,11 @@ class group_node(base_node):
                             temporary = '$fr'
                     for name, iTy, minus_flag in temporaries:
                         context.defineTemporaryDefinition(name, iTy)
-                    if isinstance(ty, Template) and ty.name in ['stack', 'queue', 'priority_queue', 'fast_pque', 'fast_pque_vk', 'set_pque', 'xpque']:
+                    if isinstance(ty, Template) and ty.name in ['stack', 'queue', 'priority_queue', 'PriorityQueue', 'fast_pque', 'fast_pque_vk', 'set_pque', 'xpque']:
                         D = {
                             'queue': 'front',
                             'priority_queue': 'top',
+                            'PriorityQueue': 'top',
                             'fast_pque': 'top',
                             'fast_pque_vk': 'top',
                             'set_pque': 'top',
@@ -1428,6 +1471,7 @@ class node_funcdef(base_node):
 
         func_name = self.name
         decorators = self.getDecorators()
+        pybind11 = decorators.get('pybind11', [None])[0]
         memo = decorators.get('memo', [None])[0]
         beam = decorators.get('beam', [None])[0]
         beam_po = decorators.get('beam_po', [None])[0]
@@ -1435,6 +1479,8 @@ class node_funcdef(base_node):
         penalty_hashes = {kv['varname'].name: str(kv['function']) if 'function' in kv else None for (v, kv) in decorators.get('penalty_hash', []) if isinstance(kv.get('varname'), node_var)}
         xheu_type = None
         xheu = None
+        if pybind11 is not None:
+            context.add_pybind11(func_name)
         if beam is not None:
             xheu, xheu_type = beam, 'beam'
         elif beam_po is not None:
@@ -2151,6 +2197,8 @@ class call_node(base_node):
             'uint64': 'unsigned long long',
             'int64': 'long long',
             'float': 'double',
+            'float32': 'float',
+            'float64': 'double',
         }
         args = []
         for arg in self.args:
@@ -2248,7 +2296,7 @@ class node_getattr(base_node):
         ty = self.obj.getType()
 
         if self.member in ['pop', 'shift', 'top', 'back', 'front']:
-            if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'queue', 'priority_queue', 'fast_pque', 'set_pque', 'xpque', 'stack'] and 1 <= len(ty.args):
+            if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'queue', 'priority_queue', 'PriorityQueue', 'fast_pque', 'set_pque', 'xpque', 'stack'] and 1 <= len(ty.args):
                 return ty.args[0]
         if self.member in ['lower_bound', 'upper_bound']:
             return 'int'
@@ -2548,6 +2596,10 @@ class pre_op1_node(base_node):
         assert self.op == '-'
         self.child_node.defines()
 
+    def definesFor(self):
+        assert self.op == '-'
+        self.child_node.definesFor()
+
     def hintType(self, ty, op):
         assert self.op == '-'
         self.child_node.hintType(ty, op)
@@ -2802,7 +2854,7 @@ class node_return_stmt(base_node):
     def toStr(self):
         if self.expr is not None:
             return 'return %s' % (self.expr, )
-        if context.is_main:
+        if context.is_main and not use_pybind11:
             return 'return 0'
         return 'return'
 
