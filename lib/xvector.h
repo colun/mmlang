@@ -5,7 +5,7 @@ private:
 public:
     inline xvector() : count(0) {
         if(use_xmem) {
-            xmem::init(this);
+            xmem::init(this, sizeof(*this));
         }
     }
     inline void set(int i, const T & o) {

@@ -1,5 +1,5 @@
 start: _NEWLINE? stmt*
-?stmt: multi_stmt | if_stmt | while_stmt | for_stmt | funcdef
+?stmt: multi_stmt | if_stmt | while_stmt | for_stmt | funcdef | classdef
 ?multi_stmt: single_stmt (";" single_stmt)* [";"] _NEWLINE
 ?single_stmt: assign | pass_stmt | break_stmt | continue_stmt | return_stmt | assert_stmt
 
@@ -22,6 +22,8 @@ typedparam: var [":" (referencedtype|test)]
 referencedtype: "&" test
 ?arguments: argvalue ("," argvalue)*
 ?argvalue: test ["=" test]
+
+classdef: decorator* "class" var ["(" var ")" ] ":" suite
 
 ?assign: tuple (assign_op tuple)* [mod]
 !assign_op: "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" | "**=" | "//=" | "<?=" | ">?="

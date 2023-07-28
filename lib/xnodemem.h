@@ -1,10 +1,14 @@
-constexpr int xnodemem$memsize = 1048576 - 256;
+constexpr int xnodemem$memsize = 65536 - 256;
 std::vector<char*> xnodemem$unused;
 struct xnodemem {
     char * p = 0;
     int size = 0;
     std::vector<char*> used;
-    std::vector<char*> current;
+    inline void swap(xnodemem & o) {
+        std::swap(p, o.p);
+        std::swap(size, o.size);
+        used.swap(o.used);
+    }
     inline char * alloc(int min_size=4096) {
         if(size<min_size) {
             if(xnodemem$unused.empty()) {
@@ -39,9 +43,5 @@ struct xnodemem {
         }
         used.clear();
         size = 0;
-    }
-    inline void free2() {
-        current.swap(used);
-        free();
     }
 };

@@ -1,9 +1,13 @@
 struct xmem {
     static char * base_ptr;
+    static const int null_patch_instance;
     static int buffer_size;
     static int redo_size;
     static std::vector<tuple<int, int> > build_work;
     static std::vector<tuple<int, int> > locks;
+    static std::vector<tuple<void *, int> > entries;
+    static int entries_mem_sum;
+    static int entries_mem_sum_lock;
     static char buffer[262144];
     std::vector<char*> mems;
     static constexpr int max_memsize = 1048576 - 256;
@@ -39,6 +43,35 @@ struct xmem {
     static inline void free(void * patch) {
         // Never free!
     }
+    static inline void check_entries() {
+        if(entries_mem_sum_lock==-1) {
+            entries_mem_sum_lock = entries_mem_sum;
+        }
+        else {
+            assert(entries_mem_sum_lock == entries_mem_sum);
+        }
+    }
+    inline void * build_snap() {
+        check_entries();
+        char * p = alloc(entries_mem_sum);
+        void * snap = (void*)p;
+        for(tuple<void *, int> & entry : entries) {
+            memcpy(p, get<0>(entry), get<1>(entry));
+            p += get<1>(entry);
+        }
+        return snap;
+    }
+    static inline void apply_snap(void * snap) {
+        check_entries();
+        char * p = (char*)snap;
+        for(tuple<void *, int> & entry : entries) {
+            memcpy(get<0>(entry), p, get<1>(entry));
+            p += get<1>(entry);
+        }
+    }
+    static inline void free_snap(void * snap) {
+        // Never free!
+    }
     static inline void lock() {
         locks.emplace_back(buffer_size, redo_size);
         redo_size = 0;
@@ -48,13 +81,37 @@ struct xmem {
         std::tie(buffer_size, redo_size) = locks.back();
         locks.pop_back();
     }
+    static inline void unlocklock() {
+        assert(!locks.empty());
+        buffer_size = get<0>(locks.back());
+        redo_size = 0;
+    }
     static inline bool enabled() {
         return !locks.empty();
     }
-    static inline void init(void * mem) {
+    static inline void init(void * mem, int sz) {
         if unlikely(!base_ptr) {
             base_ptr = (char*)mem;
         }
+        entries_mem_sum += sz;
+        entries.emplace_back(mem, sz);
+        //fprintf(stderr, "xmem: %p, %d ... %d\n", mem, sz, entries_mem_sum);
+    }
+    static inline void trace_modify(std::vector<char*> & vec) {
+        assert(!locks.empty());
+        vec.clear();
+        int base_buffer_size = std::get<0>(locks.back());
+        int buffer_size2 = buffer_size;
+        while(base_buffer_size<buffer_size2) {
+            buffer_size2 -= 4;
+            char * p = base_ptr + *(int*)(buffer+buffer_size2);
+            buffer_size2 -= 2;
+            int size = *(unsigned short*)(buffer+buffer_size2);
+            buffer_size2 -= size;
+            vec.emplace_back(p);
+            vec.emplace_back(p+size);
+        }
+        assert(base_buffer_size==buffer_size2);
     }
     static inline void modify(void * mem, int size) {
         if(locks.empty()) {
@@ -104,7 +161,6 @@ struct xmem {
         assert(p==ep);
     }
     inline void * build_undo() {
-        //*
         assert(!locks.empty());
         int base_buffer_size = std::get<0>(locks.back());
         int bs = buffer_size;
@@ -183,6 +239,9 @@ struct xmem {
         redo(ret);
         return ret;
     }
+    static inline void * get_null_patch() {
+        return (void*)&null_patch_instance;
+    }
     static inline void redo(void * patch) {
         //UNDO時の順番とREDO時の順番は逆だが、REDOデータはbuild時に作られるため、どの順番で実行されても問題ない。
         assert(patch);
@@ -206,8 +265,12 @@ struct xmem {
 char * xmem::base_ptr = 0;
 int xmem::buffer_size = 0;
 int xmem::redo_size = 0;
+const int xmem::null_patch_instance = 4;
 std::vector<std::tuple<int, int> > xmem::locks;
 std::vector<std::tuple<int, int> > xmem::build_work;
+std::vector<tuple<void *, int> > xmem::entries;
+int xmem::entries_mem_sum = 0;
+int xmem::entries_mem_sum_lock = -1;
 char xmem::buffer[262144];
 
 inline void xmem_lock() {

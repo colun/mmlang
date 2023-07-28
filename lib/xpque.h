@@ -35,7 +35,7 @@ private:
     }
 public:
     inline xpque() : count(0) {
-        xmem::init(this);
+        xmem::init(this, sizeof(*this));
     }
     inline void clear() {
         xmem::modify(&count, sizeof(count));

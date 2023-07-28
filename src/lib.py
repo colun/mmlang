@@ -15,6 +15,10 @@ func_definition = {
     'debug0': (None, 'debug.h'),
     'debugF': (None, 'debug.h'),
     'debug0F': (None, 'debug.h'),
+    'dump': (None, 'dump.h'),
+    'dump0': (None, 'dump.h'),
+    'dumpF': (None, 'dump.h'),
+    'dump0F': (None, 'dump.h'),
     'mod': ('int', 'mod.h'),
     'mod_mul': ('int', 'mod_mul.h'),
     'int': ('int', None),
@@ -58,11 +62,13 @@ func_definition = {
     'asm_mul_hi': ('unsigned int', 'asm_mul_hi.h'),
     'lrand49': ('int', 'lrand49.h'),
     'drand49': ('double', 'drand49.h'),
+    'sarand49': ('float', 'sarand49.h'),
     'mrand49': ('int', 'mrand49.h'),
     'mmrand49': ('long long', 'mmrand49.h'),
     'srand49': (None, 'srand49.h'),
     'initTime': (None, 'get_time.h'),
     'getTime': ('double', 'get_time.h'),
+    'setLocalTimeRate': (None, 'get_time.h'),
     'getCpuClock': ('unsigned long long', 'get_cpu_clock.h'),
     'getNativeTime': ('double', 'get_native_time.h'),
     'gvFps': ('bool', 'gv.h'),
@@ -83,10 +89,13 @@ func_definition = {
     'usleep': (None, 'unistd.h'),
     'addresser2d': ('addresser2d', 'addresser2d.h'),
     'encode_float18': (None, 'encode_float18.h'),
-    'decode_float18': ('float', 'decode_float18.h'),
+    'decode_float': ('float', 'decode_float.h'),
+    'decode_ndarray': (None, 'decode_ndarray.h'),
+    'ReLU': (None, 'ReLU.h'),
     'store2d': (None, 'store2d.h'),
     'rng49': ('rng49', 'rng49.h'),
     'gvRGB': ('gvRGB', 'gv.h'),
+    'gvHSB': ('gvRGB', 'gv.h'),
 }
 dependency = {
     'input_c_line_or_word.h': ['cassert', 'cstdio', 'cstring'],
@@ -101,6 +110,7 @@ dependency = {
     'input_float.h': ['cstdlib', 'input_c_word.h'],
     'print.h': ['cstdio'],
     'debug.h': ['cstdio'],
+    'dump.h': ['debug.h'],
     'mm_score.h': ['cstdio'],
     'BIT.h': ['vector'],
     'unionfind.h': ['vector'],
@@ -117,18 +127,22 @@ dependency = {
     'get_time.h': ['get_cpu_clock.h', 'get_native_time.h', 'cmath'],
     'dpque.h': ['vector', 'utility'],
     'xmem.h': ['cassert', 'cstring', 'unlikely.h'],
+    'xvar.h': ['xmem.h'],
     'xarray.h': ['cassert', 'xmem.h', 'fast_array.h', 'xref.h'],
     'xvector.h': ['cassert', 'iterator', 'algorithm', 'xmem.h', 'fast_array.h', 'xref.h', 'likely.h', 'unlikely.h'],
     'xdeque.h': ['cassert', 'iterator', 'algorithm', 'xmem.h', 'fast_array.h', 'xref.h', 'likely.h', 'unlikely.h'],
     'xpque.h': ['cassert', 'xmem.h', 'fast_array.h'],
+    'xbitset.h': ['cassert', 'xmem.h'],
     'fast_pque.h': ['cassert', 'fast_array.h'],
     'fast_pque_vk.h': ['cassert', 'fast_array.h'],
     'xbeam.h': ['get_time.h', 'fast_pool.h', 'dpque.h', 'xmem.h', 'xnodemem.h'],
     'xbeam_po.h': ['cfloat', 'get_time.h', 'fast_pool.h', 'dpque.h', 'xmem.h', 'xnodemem.h'],
+    'xbeam_pa.h': ['get_time.h', 'fast_pool.h', 'dpque.h', 'xmem.h', 'xnodemem.h', 'drand49.h'],
     'lrand49.h': ['mrand49.h', 'asm_mul_hi.h'],
     'drand49.h': ['mrand49.h'],
     'mrand49.h': ['asm_mul_hi.h'],
     'mmrand49.h': ['mrand49.h'],
+    'sarand49.h': ['mrand49.h'],
     'gv.h': ['vector', 'cstdarg', 'cmath', 'get_time.h'],
     'logit.h': ['cmath'],
     'sigmoid.h': ['cmath'],
@@ -143,6 +157,10 @@ dependency = {
     'store2d.h': ['cstdio', 'sys/stat.h', 'param_str.h', 'encode_float18.h', 'addresser2d.h'],
     'rng49.h': ['cassert', 'asm_mul_hi.h'],
     'EulerTourTree.h': ['cassert', 'utility', 'unordered_map', 'fast_pool.h'],
+    'decode_ndarray.h': ['vector', 'decode_float.h'],
+    'Conv2d.h': ['decode_ndarray.h'],
+    'ConvTranspose2d.h': ['decode_ndarray.h'],
+    'BatchNorm2d.h': ['decode_ndarray.h'],
 }
 nocompress = set([
 ])
@@ -258,6 +276,9 @@ class_definition = {
         'small': '$1',
         'empty': 'bool',
     }, 'dpque.h'),
+    'xbitset': ({
+        'test': 'bool',
+    }, 'xbitset.h'),
     'xvar': ({
     }, 'xvar.h'),
     'addresser2d': ({
@@ -324,4 +345,10 @@ class_definition = {
         'inputFloat64': 'double',
         'inputFloat': 'double',
     }, 'binary_file.h'),
+    'BatchNorm2d': ({
+    }, 'BatchNorm2d.h'),
+    'Conv2d': ({
+    }, 'Conv2d.h'),
+    'ConvTranspose2d': ({
+    }, 'ConvTranspose2d.h'),
 }
