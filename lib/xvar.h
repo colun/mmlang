@@ -3,10 +3,10 @@ private:
     T data;
 public:
     inline xvar(const T & o) : data(o) {
-        xmem::init(this);
+        xmem::init(this, sizeof(*this));
     }
     inline xvar() : data() {
-        xmem::init(this);
+        xmem::init(this, sizeof(*this));
     }
     inline void operator = (const T & o) {
         if(data!=o) {

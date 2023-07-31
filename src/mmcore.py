@@ -1,11 +1,24 @@
 import os
 import re
+import jinja2
 from . import lib
 from . import mmbase
 
 SRC_DIR = os.path.dirname(__file__)
 ROOT_DIR = os.path.dirname(SRC_DIR)
 LIB_DIR = os.path.join(ROOT_DIR, 'lib')
+
+
+toCppTypeFromPython_D = {
+    'uint64': 'unsigned long long',
+    'int64': 'long long',
+    'float': 'double',
+    'float32': 'float',
+    'float64': 'double',
+}
+def toCppTypeFromPython(ty):
+    ty = str(ty)
+    return toCppTypeFromPython_D.get(ty, ty)
 
 
 def restruct(obj, new_class, *args, **kargs):
@@ -22,7 +35,8 @@ def typeToStr(ty):
     assert not isinstance(ty, tuple)
     if isinstance(ty, tuple):
         return ('tuple<%s>' % (', '.join([typeToStr(t) for t in ty]), )).replace('>>', '> >')
-    return str(ty)
+    ty = str(ty)
+    return toCppTypeFromPython_D.get(ty, ty)
 
 
 def typeFromLib(name):
@@ -282,6 +296,7 @@ def toStrBoundArg(containerTy, args, upper_flag):
 
 
 use_profiler = False
+use_sa_profiler = False
 use_pybind11 = False
 
 
@@ -292,6 +307,7 @@ class CodeContext:
         self.tabed = False
 
         self.used_includes = ['cassert', 'vector', 'deque', 'string', 'map', 'queue', 'stack', 'algorithm', 'type.h']
+        self.used_defines = []
         self.breaks = []
         self.breaks_used = []
         self.break_label_index = 0
@@ -303,6 +319,9 @@ class CodeContext:
 
     def getUsedIncludes(self):
         return self.used_includes
+
+    def getUsedDefines(self):
+        return self.used_defines
 
     def print0(self, text):
         if not self.tabed:
@@ -340,6 +359,11 @@ class CodeContext:
             self.used_includes.insert(0, inc)
         else:
             self.used_includes.append(inc)
+
+    def appendDefine(self, name):
+        if name is None or name in self.used_defines:
+            return
+        self.used_defines.append(name)
 
     def visitInclude(self, name):
         if name in lib.func_definition:
@@ -391,6 +415,7 @@ class Context:
         self.parent = parent
         self.scopeLevel = scopeLevel
         self.func_types = {}
+        self.func_args = {}
         self.definitions = {}
         self.temporaryDefinitions = {}
         self.removeBook = []
@@ -471,9 +496,20 @@ class Context:
         self.instant_c_count = 0
         return ret
 
-    def declareFunc(self, name, ty):
+    def declareFunc(self, name, ty, params):
         #print('FUNC', name, ty)#TODO
         self.func_types[name] = ty
+        self.func_args[name] = params
+
+    def declareClass(self, name, parent_class):
+        cls_obj = {}
+        if parent_class is not None:
+            cls_obj = {**lib.class_definition.get(parent_class)}
+        lib.class_definition[name] = (cls_obj, None)
+        return cls_obj
+
+    def declareClassFunc(self, cls_obj, name, ty, params):
+        cls_obj[name] = ty
 
     def getReturnType(self, name):
         if name in self.func_types:
@@ -483,6 +519,13 @@ class Context:
         if name in lib.func_definition:
             return typeFromLib(lib.func_definition[name][0])
         assert False, "function '%s' is not defined" % name
+
+    def getFuncArgs(self, name):
+        if name in self.func_args:
+            return self.func_args[name]
+        if self.parent is not None:
+            return self.parent.getFuncArgs(name)
+        return None
 
     def getMethodReturnType(self, ty, name):
         if isinstance(ty, Template):
@@ -637,6 +680,9 @@ class Context:
     def getUsedIncludes(self, *args, **kargs):
         return self.code_context.getUsedIncludes(*args, **kargs)
 
+    def getUsedDefines(self, *args, **kargs):
+        return self.code_context.getUsedDefines(*args, **kargs)
+
     def print0(self, *args, **kargs):
         return self.code_context.print0(*args, **kargs)
 
@@ -654,6 +700,9 @@ class Context:
 
     def appendInclude(self, *args, **kargs):
         return self.code_context.appendInclude(*args, **kargs)
+
+    def appendDefine(self, *args, **kargs):
+        return self.code_context.appendDefine(*args, **kargs)
 
     def visitInclude(self, *args, **kargs):
         return self.code_context.visitInclude(*args, **kargs)
@@ -826,19 +875,21 @@ class group_node(base_node):
         context = self.context
         for name, ty, count, param_flag, node in context.getDefinitions():
             if isinstance(node, base_node) and count == 1 and node.isConstExpr() and typeToStr(ty) in constexpr_types:
-                context.print('constexpr %s %s = %s;' % (typeToStr(ty), name, node))
+                context.print('static constexpr %s %s = %s;' % (typeToStr(ty), name, node))
                 context.setImmutable(name)
                 continue
             if param_flag == 1:
                 context.print('%s %s;' % (typeToStr(ty), name))
         context = preContext
 
-    def start(self, source_name, profiler_flag, pybind11_flag):
+    def start(self, source_name, profiler_flag, sa_profiler_flag, pybind11_flag):
         global context
         global use_profiler
+        global use_sa_profiler
         global use_pybind11
         context = Context(scopeLevel=0)
         use_profiler = profiler_flag
+        use_sa_profiler = sa_profiler_flag
         use_pybind11 = pybind11_flag
         if use_profiler:
             context.appendInclude('profiler.h')
@@ -848,11 +899,13 @@ class group_node(base_node):
         self.visit('visitInclude')
         assert self.node_type == 'start'
         self.defines()
-        self.visit('visitDeclare')
+        self.visit('visitDeclare0')
+        self.visit('visitDeclare', childrenMethods='getChildNodesWithoutSuite')
+        self.visit('visitCallFunc')
         self.redefines()
         self.printDefines()
         context.printBlank()
-        self.visit('visitDeclare2')
+        #self.visit('visitDeclare2', childrenMethods='getChildNodesWithoutSuite')
         context.printBlank()
         self.visit('visitDefineFunc')
         context.printBlank()
@@ -874,6 +927,8 @@ class group_node(base_node):
             context.print('return 0;')
         context.dedent()
         context.print('}')
+        for name in context.getUsedDefines():
+            print('#define %s' % (name, ))
         for inc in context.getUsedIncludes():
             if not os.path.exists('%s/%s' % (LIB_DIR, inc)):
                 print('#include <%s>' % (inc, ))
@@ -932,6 +987,11 @@ class group_node(base_node):
                 context = Context(parentContext, scopeLevel=0)
                 child.defines()
                 context = parentContext
+            elif isinstance(child, node_classdef):
+                parentContext = context
+                context = Context(parentContext, scopeLevel=0)
+                child.defines()
+                context = parentContext
             elif isinstance(child, op2_node) and child.node_type == 'assign':
                 # 値の代入を確認（スコープの確認！）
                 args_len = (len(child.args) - 1) // 2
@@ -954,11 +1014,11 @@ class group_node(base_node):
         parentContext = context
         context = self.context
         for child in self.getChildNodes():
-            if isinstance(child, node_if_stmt) or isinstance(child, node_for_stmt) or isinstance(child, node_while_stmt) or isinstance(child, node_funcdef):
+            if isinstance(child, node_if_stmt) or isinstance(child, node_for_stmt) or isinstance(child, node_while_stmt) or isinstance(child, node_funcdef) or isinstance(child, node_classdef):
                 for suite in child.getSuiteChildNodes():
                     suite.redefines()
-            elif isinstance(child, node_funcdef):
-                child.suite.redefines()
+            elif isinstance(child, node_funcdef):# TODO 不要な行なのでは？
+                child.suite.redefines()# TODO 不要な行なのでは？
             elif isinstance(child, op2_node) and child.node_type == 'assign':
                 # 値の再代入を確認（+=や*=なども含めて）（型に対してやや緩やかになるため）
                 args_len = (len(child.args) - 1) // 2
@@ -1199,6 +1259,11 @@ class group_node(base_node):
         return nest_count
 
     def suiteWithDefines(self):
+        global context
+        preContext = context
+        context = self.context
+        self.visit('visitCallFunc')
+        context = preContext
         self.printDefines()
         self.suite()
 
@@ -1210,6 +1275,8 @@ class group_node(base_node):
         for child in self.getChildNodes():
             context.releaseTemporaryDefinition()
             if isinstance(child, node_funcdef):
+                continue
+            if isinstance(child, node_classdef):
                 continue
             if isinstance(child, node_varhint):
                 continue
@@ -1441,28 +1508,38 @@ class node_funcdef(base_node):
     def getChildNodes(self):
         return self.getChildNodesWithoutSuite() + self.getSuiteChildNodes()
 
-    def visitDeclare(self):
-        context.declareFunc(
-            self.name, None if self.return_type is None else str(self.return_type))
-
-    def visitDeclare2(self):
-        context.print('%s %s(%s);' % ('void' if self.return_type is None else self.return_type,
-                                      self.name, ', '.join(str(param) for param in self.parameters)))
-
     def getDecorators(self):
         ret = {}
         for decorator in self.decorators:
             values = []
             keyvalues = {}
+            keyvalues2 = {}
             for arg in decorator.args:
                 if isinstance(arg, node_argvalue):
-                    keyvalues[arg.name] = arg.value
+                    keyvalues[arg.name] = str(arg.value)
+                    keyvalues2[arg.name] = arg.value
                 else:
                     values.append(arg)
             if decorator.name not in ret:
                 ret[decorator.name] = []
-            ret[decorator.name].append((values, keyvalues))
+            ret[decorator.name].append((values, keyvalues, keyvalues2))
         return ret
+
+    def visitDeclare(self):
+        if isinstance(self.parent, node_classdef):
+            context.declareClassFunc(
+                self.parent.class_obj,
+                self.name, None if self.return_type is None else str(self.return_type),
+                self.parameters)
+        else:
+            context.declareFunc(
+                self.name, None if self.return_type is None else str(self.return_type),
+                self.parameters)
+        decorators = self.getDecorators()
+        sa = decorators.get('sa', [None])[0]
+        ra = decorators.get('ra', [None])[0]
+        context.print('%s %s(%s);' % ('void' if self.return_type is None or sa is not None or ra is not None else toCppTypeFromPython(self.return_type),
+                                        self.name, ', '.join(str(param) for param in self.parameters)))
 
     def visitDefineFunc(self):
         global context
@@ -1475,8 +1552,11 @@ class node_funcdef(base_node):
         memo = decorators.get('memo', [None])[0]
         beam = decorators.get('beam', [None])[0]
         beam_po = decorators.get('beam_po', [None])[0]
+        beam_pa = decorators.get('beam_pa', [None])[0]
         sa_dac = decorators.get('sa_dac', [None])[0]
-        penalty_hashes = {kv['varname'].name: str(kv['function']) if 'function' in kv else None for (v, kv) in decorators.get('penalty_hash', []) if isinstance(kv.get('varname'), node_var)}
+        sa = decorators.get('sa', [None])[0]
+        ra = decorators.get('ra', [None])[0]
+        penalty_hashes = {kv['varname']: kv['function'] if 'function' in kv else None for (v, kv) in decorators.get('penalty_hash', [])}
         xheu_type = None
         xheu = None
         if pybind11 is not None:
@@ -1485,29 +1565,33 @@ class node_funcdef(base_node):
             xheu, xheu_type = beam, 'beam'
         elif beam_po is not None:
             xheu, xheu_type = beam_po, 'beam_po'
+        elif beam_pa is not None:
+            xheu, xheu_type = beam_pa, 'beam_pa'
         elif sa_dac is not None:
             xheu, xheu_type = sa_dac, 'sa_dac'
-        if memo is not None or xheu is not None:
+        if memo is not None or xheu is not None or sa is not None or ra is not None:
             func_name = '%s$origin' % (self.name, )
             if xheu_type == 'beam':
                 assert self.return_type is None
             if xheu_type == 'beam_po':
                 assert self.return_type is None
+            if xheu_type == 'beam_pa':
+                assert self.return_type is None
             if xheu_type == 'sa_dac':
                 assert str(self.return_type) == 'float'
 
-        context.print('%s %s(%s) {' % ('void' if self.return_type is None else self.return_type,
-                                       func_name, ', '.join(str(param) for param in self.parameters)))
+        context.print('%s%s %s%s(%s) {' % ('inline ' if memo is not None or xheu is not None or sa is not None or ra is not None else '', 'void' if self.return_type is None else toCppTypeFromPython(self.return_type),
+                                           self.parent.parent.name+'::' if isinstance(self.parent, group_node) and self.parent.node_type!='start' and isinstance(self.parent.parent, node_classdef) else '',
+                                           func_name, ', '.join(str(param) for param in self.parameters)))
         context.indent()
         if use_profiler:
             context.print('MM$P$Func MM$P$func;')
-        self.suite.printDefines()
-        self.suite.suite()
+        self.suite.suiteWithDefines()
         context.dedent()
         context.print('}')
         if memo is not None:
             cycle = memo[1].get('cycle', None)
-            size = memo[1].get('size', None)
+            size = memo[2].get('size', None)
             default_value = memo[1].get('default', None)
             if default_value is None:
                 default_value = '(unsigned %s)-1 >> 1' % (self.return_type, )
@@ -1557,11 +1641,46 @@ class node_funcdef(base_node):
                 context.print('return ret;')
             context.dedent()
             context.print('}')
-        if xheu is not None:
+        if (xheu is not None and beam_pa is not None) or sa is not None or ra is not None:
+        #if sa is not None or ra is not None:
+            template = open(os.path.join(os.path.dirname(__file__), 'decorators', 'beam.cpp')).read()
+            if sa is not None:
+                xheu = sa
+                if use_sa_profiler:
+                    template = open(os.path.join(os.path.dirname(__file__), 'decorators', 'sa-profiler.cpp')).read()
+                else:
+                    template = open(os.path.join(os.path.dirname(__file__), 'decorators', 'sa.cpp')).read()
+            elif ra is not None:
+                xheu = ra
+                template = open(os.path.join(os.path.dirname(__file__), 'decorators', 'ra.cpp')).read()
+            params = []
+            p_type = {}
+            for param in self.parameters:
+                params.append(param.name)
+                p_type[param.name] = typeToStr(param.ty)
+            def assert_func(x, msg):
+                assert x, msg
+                return ''
+            context.print(jinja2.Template(template).render({
+                **xheu[1],
+                'NAME': str(self.name),
+                'RET_TYPE': toCppTypeFromPython(self.return_type),
+                'PARAMS': params,
+                'P_TYPE': (lambda x: p_type.get(x)),
+                'PENALTY_HASHES': penalty_hashes,
+                'def': (lambda x: x in xheu[1]),
+                'get': xheu[1].get,
+                'include': (lambda x: ['', context.appendInclude(x)][0]),
+                'define': (lambda x: ['', context.appendDefine(x)][0]),
+                'assert': assert_func,
+            }))
+        elif xheu is not None:
             maxdepth = xheu[1].get('maxdepth', None)
             maxwidth = xheu[1].get('maxwidth', None)
             timelimit = xheu[1].get('timelimit', None)
             verbose = xheu[1].get('verbose', None)
+            proactive = xheu[1].get('proactive', None)
+            zipf = xheu[1].get('zipf', None)
             avg_bonus_rate = xheu[1].get('avg_bonus_rate', None)
             stdev_bonus_rate = xheu[1].get('stdev_bonus_rate', None)
             ucb_bonus_rate = xheu[1].get('ucb_bonus_rate', None)
@@ -1572,6 +1691,9 @@ class node_funcdef(base_node):
             if xheu_type == 'beam_po':
                 context.appendInclude('xbeam_po.h')
                 context.print('xbeam_po %s$so;' % (self.name, ))
+            if xheu_type == 'beam_pa':
+                context.appendInclude('xbeam_pa.h')
+                context.print('xbeam_pa %s$so;' % (self.name, ))
             elif xheu_type == 'sa_dac':
                 context.appendInclude('xsa_dac.h')
                 context.print('xsa_dac %s$so;' % (self.name, ))
@@ -1634,9 +1756,9 @@ class node_funcdef(base_node):
                     context.dedent()
                     context.print('}')
                 if xheu_type == 'beam_po':
-                    context.print('if(%s$visited.testWithSet(%s) && %s$so.skip()) continue;' % (self.name, param.name, self.name))
+                    context.print('if(%s$visited.testWithSet(hash) && %s$so.skip()) continue;' % (self.name, self.name))
                 else:
-                    context.print('if(%s$visited.testWithSet(%s)) continue;' % (self.name, param.name))
+                    context.print('if(%s$visited.testWithSet(hash)) continue;' % (self.name, ))
             if penalty_hash_flag and 'score' in [param.name for param in self.parameters]:
                 for param in self.parameters:
                     if param.name in penalty_hashes:
@@ -1671,6 +1793,10 @@ class node_funcdef(base_node):
             for clear_with_init in clear_with_inits:
                 context.print('%s.clear();' % (clear_with_init, ))
             context.print('%s$so.init(%s, %s, %s);' % (self.name, maxdepth, timelimit, maxwidth))
+            if xheu_type == 'beam_pa' and proactive is not None:
+                context.print('%s$so.setProactive(%s);' % (self.name, proactive))
+            if xheu_type == 'beam_pa' and zipf is not None:
+                context.print('%s$so.setZipfRate(%s);' % (self.name, zipf))
             if visitclear is not None:
                 context.print('%s$remain_depth = (%s)+1;' % (self.name, maxdepth))
             if verbose is not None:
@@ -1688,12 +1814,90 @@ class node_funcdef(base_node):
         context.printBlank()
         context = parentContext
 
+class node_classdef(base_node):
+
+    def __init__(self, meta, node_type, *args):
+        self.meta = meta
+        self.node_type = node_type
+        self.decorators = []
+        self.name = None
+        self.parent_class = None
+        self.suite = args[-1]
+        for arg in args[:-1]:
+            if isinstance(arg, node_decorator):
+                self.decorators.append(arg)
+            elif self.name is None:
+                assert isinstance(arg, node_var)
+                self.name = arg.name
+            else:
+                assert self.parent_class is None
+                assert isinstance(arg, node_var)
+                self.parent_class = arg.name
+
+    def toStr(self):
+        TODO
+
+    def defines(self):
+        self.suite.defines()
+
+    def getChildNodesWithoutSuite(self):
+        return self.decorators
+
+    def getSuiteChildNodes(self):
+        return [self.suite]
+
+    def getChildNodes(self):
+        return self.getChildNodesWithoutSuite() + self.getSuiteChildNodes()
+
+    def visitDeclare(self):
+        self.class_obj = context.declareClass(self.name, self.parent_class)
+
+    def getDecorators(self):
+        ret = {}
+        for decorator in self.decorators:
+            values = []
+            keyvalues = {}
+            for arg in decorator.args:
+                if isinstance(arg, node_argvalue):
+                    keyvalues[arg.name] = str(arg.value)
+                else:
+                    values.append(arg)
+            if decorator.name not in ret:
+                ret[decorator.name] = []
+            ret[decorator.name].append((values, keyvalues))
+        return ret
+
+    def visitDeclare0(self):
+        context.print('struct %s;' % (self.name, ))
+
+    def visitDeclare(self):
+        context.print('struct %s%s {' % (self.name, '' if self.parent_class is None else ' : ' + self.parent_class))
+        context.indent()
+        self.suite.visit('visitDeclare')
+        self.suite.visit('visitCallFunc')
+        self.suite.redefines()
+        self.suite.printDefines()
+        context.print('%s();' % (self.name, ))
+        context.dedent()
+        context.print('};')
+
+    def visitDefineFunc(self):
+        context.print('%s::%s() {' % (self.name, self.name))
+        context.indent()
+        if use_profiler:
+            context.print('MM$P$Func MM$P$func;')
+        self.suite.suite()
+        context.dedent()
+        context.print('}')
 
 class node_varhint(base_node):
 
     def __init__(self, meta, node_type, varname, typehint):
         assert node_type == 'varhint'
-        assert isinstance(varname, node_var)
+        varname_parent = varname
+        while isinstance(varname_parent, call_node) and varname_parent.node_type=='getitem':
+            varname_parent = varname_parent.func
+        assert isinstance(varname_parent, node_var)
         self.meta = meta
         self.node_type = node_type
         self.varname = varname
@@ -1714,7 +1918,18 @@ class node_varhint(base_node):
     def reserveBind(self, name=None):
         pass
 
+    def getVarName(self):
+        varname_parent = self.varname
+        while isinstance(varname_parent, call_node) and varname_parent.node_type=='getitem':
+            varname_parent = varname_parent.func
+        return varname_parent.name
+
     def defines(self):
+        call_nodes = []
+        varname_parent = self.varname
+        while isinstance(varname_parent, call_node) and varname_parent.node_type=='getitem':
+            call_nodes.append(varname_parent)
+            varname_parent = varname_parent.func
         if self.typehint is not None:
             self.typehint.visit('visitBindSymbol')
             ty = self.typehint
@@ -1722,9 +1937,12 @@ class node_varhint(base_node):
                 ty = ty.getReturnType()
             else:
                 ty = ty.name
-            context.definesWithHint(self.varname.name, ty)
+            while len(call_nodes):
+                ty = call_nodes[-1].assembleType(ty)
+                call_nodes.pop()
+            context.definesWithHint(varname_parent.name, ty)
         else:
-            context.definesWithoutHint(self.varname.name)
+            context.definesWithoutHint(varname_parent.name)
         self.varname.visit('visitBindSymbol')
 
     def hintType(self, ty, op):
@@ -1752,6 +1970,9 @@ class node_varhint(base_node):
                 else:
                     context.visitTypeInclude(ty)
                 break
+
+    def printResize(self, size, name):
+        return self.varname.printResize(size, name)
 
 
 class loop_node(base_node):
@@ -1849,6 +2070,9 @@ class node_var(base_node):
 
     def getChildNodes(self):
         return []
+
+    def getVarName(self):
+        return self.name
 
     def getReturnType(self):
         if self.name in ['min', 'max'] and isinstance(self.parent, call_node) and self.parent.args is not None:
@@ -2029,7 +2253,7 @@ class node_typedparam(base_node):
 
     def toStr(self):
         ty = 'int' if self.ty is None else (self.ty.getReturnType() if isinstance(self.ty, call_node) and self.ty.node_type == 'template' else str(self.ty))
-        return '%s%s%s' % (ty, ' & ' if self.referenced else ' ', self.name)
+        return '%s%s%s' % (toCppTypeFromPython(ty), ' & ' if self.referenced else ' ', self.name)
 
     def defines(self):
         ty = 'int' if self.ty is None else (self.ty.getReturnType() if isinstance(self.ty, call_node) and self.ty.node_type == 'template' else str(self.ty))
@@ -2067,6 +2291,18 @@ class call_node(base_node):
             context.visitInclude('_slice')
         if self.node_type == 'template':
             context.visitTypeInclude(self.func.name)
+
+    def visitCallFunc(self):
+        if self.node_type != 'funccall':
+            return;
+        if isinstance(self.func, node_var):
+            args_info = context.getFuncArgs(self.func.name)
+            #context.print("visitCallFunc %s %s %s" % (self.func, type(self.args), type(args_info)))
+            if isinstance(self.args, tuple) and isinstance(args_info, tuple):
+                for arg, arg_info in zip(self.args, args_info):
+                    if isinstance(arg, node_var) and isinstance(arg_info, node_typedparam) and arg_info.referenced:
+                        arg.countMutate()
+                        #context.print("%s %s %s" % (arg.name, arg_info.name, arg_info.referenced))
 
     def toStr(self):
         if self.node_type == 'getitem':
@@ -2193,21 +2429,12 @@ class call_node(base_node):
 
     def getReturnType(self):
         assert self.node_type == 'template'
-        D = {
-            'uint64': 'unsigned long long',
-            'int64': 'long long',
-            'float': 'double',
-            'float32': 'float',
-            'float64': 'double',
-        }
         args = []
         for arg in self.args:
             if isinstance(arg, call_node) and arg.node_type == 'template':
                 args.append(arg.getReturnType())
             elif arg is not None:
-                arg = str(arg)
-                arg = D.get(arg, arg)
-                args.append(arg)
+                args.append(toCppTypeFromPython(arg))
             else:
                 TODO
         return Template(self.func.name, args)
@@ -2218,7 +2445,7 @@ class call_node(base_node):
             arg.visit('visitBindSymbol')
         self.func.defines()
 
-    def hintType(self, ty, op):
+    def assembleType(self, ty):
         assert self.node_type == 'getitem'
         assert len(self.args) == 1
         if isinstance(ty, base_node):
@@ -2228,7 +2455,10 @@ class call_node(base_node):
             ty = Template('map', ['string', ty])
         else:
             ty = Template('vector', [ty])
-        self.func.hintType(ty, op)
+        return ty
+
+    def hintType(self, ty, op):
+        self.func.hintType(self.assembleType(ty), op)
 
     def countMutate(self):
         assert self.node_type == 'getitem'
@@ -2316,7 +2546,7 @@ class tuple_node(base_node):
         self.node_type = node_type
         if node_type == 'list':
             assert len(elements) == 1
-            assert isinstance(elements[0], tuple_node)
+            #assert isinstance(elements[0], tuple_node)
             elements = elements[0].getChildNodes()
         self.elements = elements
 
@@ -2331,8 +2561,8 @@ class tuple_node(base_node):
         else:
             assert self.node_type == 'tuple'
             tuple_expr = ', '.join(str(e) for e in self.elements)
-            if isinstance(self.parent, op2_node) and self.parent.node_type == 'assign' or isinstance(self.parent, node_parenthesis):
-                if isinstance(self.parent, node_parenthesis) or self.parent.args[-1] == self:
+            if isinstance(self.parent, op2_node) and self.parent.node_type == 'assign' or isinstance(self.parent, node_parenthesis) or isinstance(self.parent, node_tuple):
+                if isinstance(self.parent, node_parenthesis) or isinstance(self.parent, node_tuple) or self.parent.args[-1] == self:
                     prefix = typeToStr(self.getType())
                 else:
                     prefix = 'tie'
@@ -2499,10 +2729,28 @@ class op2_node(base_node):
                 return '%s = min(%s, %s)' % (self.args[0], castToStr(self.args[0], ty), castToStr(self.args[2], ty))
             else:
                 return '%s = max(%s, %s)' % (self.args[0], castToStr(self.args[0], ty), castToStr(self.args[2], ty))
-        if self.node_type == 'assign' and len(self.args) == 3 and self.args[1] == '=' and (isinstance(self.args[0], node_var) or isinstance(self.args[0], node_varhint)):
-            definition = context.getDefinition(self.args[0].varname.name if isinstance(self.args[0], node_varhint) else self.args[0].name)
-            if definition is not None and definition[2] == 2:
-                return ''
+        if self.node_type == 'assign' and len(self.args) == 3 and self.args[1] == '=':
+            if isinstance(self.args[0], node_tuple) and self.args[0].node_type == 'tuple' and isinstance(self.args[2], node_tuple) and self.args[2].node_type == 'tuple':
+                L = []
+                for dst, src in zip(self.args[0].elements, self.args[2].elements):
+                    flag = True;
+                    if isinstance(dst, node_var) or isinstance(dst, node_varhint):
+                        definition = context.getDefinition(dst.varname.name if isinstance(dst, node_varhint) else dst.name)
+                        if definition is not None and definition[2] == 2:
+                            flag = False;
+                    if flag:
+                        L.append((dst, src))
+                if len(L)==0:
+                    return ''
+                elif len(L)==1:
+                    return '%s = %s' % (L[0][0], L[0][1])
+                else:
+                    return 'tie(%s) = %s(%s)' % (', '.join(str(e[0]) for e in L), typeToStr(tuple_node(self.args[2].meta, 'tuple', *[e[1] for e in L]).getType()), ', '.join(str(e[1]) for e in L))
+
+            if isinstance(self.args[0], node_var) or isinstance(self.args[0], node_varhint):
+                definition = context.getDefinition(self.args[0].getVarName())
+                if definition is not None and definition[2] == 2:
+                    return ''
         return ' '.join(str(arg) for arg in self.args)
 
     def getType(self):

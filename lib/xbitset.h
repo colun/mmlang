@@ -5,13 +5,13 @@ public:
     unsigned long long data_[qword_size];
     inline xbitset() noexcept {
         if(use_xmem) {
-            xmem::init(this);
+            xmem::init(this, sizeof(*this));
         }
         memset(data_, 0, sizeof(data_));
     }
     template<bool use_xmem2> inline xbitset(const xbitset<N, use_xmem2> & o) noexcept {
         if(use_xmem) {
-            xmem::init(this);
+            xmem::init(this, sizeof(*this));
         }
         memcpy(data_, o.data_, sizeof(data_));
     }

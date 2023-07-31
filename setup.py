@@ -15,9 +15,11 @@ setuptools.setup(
     },
     include_package_data=True,
     install_requires=[
+        'psutil',
         'lark-parser',
         'colorama',
         'atcoder-tools',
+        'markupsafe==2.0.1',
     ],
     entry_points={
         'console_scripts': [

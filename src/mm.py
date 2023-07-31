@@ -79,7 +79,7 @@ def compile_raw(args):
         print()
         tree = parser.parse(args.source)
         tree = expand(tree)
-        tree.start(args.source_name, args.profiler, args.pybind11)
+        tree.start(args.source_name, args.profiler, args.sa_profiler, args.pybind11)
     except Exception as e:
         info = sys.exc_info()
         #sys.excepthook(*info)
@@ -209,6 +209,7 @@ def build(args):
     if args.test:
         options.append('-DMM$TEST')
     options.append('-pthread')
+    #options.append('-fsanitize=address')
     subprocess.run(['g++', '-std=gnu++14'] + options + ['-O2', args.output_path, '-o', args.aout])
     args.build_success = os.path.exists(args.aout)
     if args.build_success:
@@ -291,7 +292,12 @@ def test(args):
         if os.path.exists('result.gv'):
             gvc_path = os.path.join(WORK_DIR, 'gvc', 'gvc.jar')
             download('https://github.com/colun/gvc/raw/master/gvc.jar', gvc_path)
-            subprocess.run(['java', '-jar', gvc_path, 'result.gv'])
+            cmd = ['java', '-jar', gvc_path, 'result.gv']
+            #if args.vis_pipe:
+            #    cmd.append('-pipe')
+            if args.vis_sixel:
+                cmd.append('-sixel')
+            subprocess.run(cmd)
     else:
         if tests is None:
             test_size = int(args.test_size) if args.test_size is not None else (100000 if args.test_random else (100 // executor.threads) * executor.threads)
@@ -361,7 +367,12 @@ def run(args):
     if os.path.exists('result.gv'):
         gvc_path = os.path.join(WORK_DIR, 'gvc', 'gvc.jar')
         download('https://github.com/colun/gvc/raw/master/gvc.jar', gvc_path)
-        subprocess.run(['java', '-jar', gvc_path, 'result.gv'])
+        cmd = ['java', '-jar', gvc_path, 'result.gv']
+        #if args.vis_pipe:
+        #    cmd.append('-pipe')
+        if args.vis_sixel:
+            cmd.append('-sixel')
+        subprocess.run(cmd)
 
 
 def compile_file(origin_outs, target_path, output_path, args):
@@ -499,7 +510,7 @@ def main():
     parser = argparse.ArgumentParser(description='MM Language ' + __version__)
     parser.add_argument('target', metavar='SOURCE', help='source code file/folder')
     arggroup = parser.add_argument_group('build / run / test')
-    arggroup.add_argument('--output', metavar='OUTPUT', help='output file/folder')
+    arggroup.add_argument('--output', metavar='OUTPUT', default='a.out.cpp', help='output file/folder')
     arggroup.add_argument('--build', action='store_true', help='compile')
     arggroup.add_argument('--pybind11', action='store_true', help='use pybind11')
     arggroup.add_argument('--run', action='store_true', help='compile + execute')
@@ -512,9 +523,13 @@ def main():
     arggroup.add_argument('--workers', metavar='N', type=int, default=None, help='count of worker processes')
     arggroup = parser.add_argument_group('build options')
     arggroup.add_argument('--profiler', action='store_true', help='profiler on')
+    arggroup.add_argument('--sa-profiler', action='store_true', help='[unimplemented] sa profiler on')
     arggroup.add_argument('--ndebug', dest='debug', action='store_false', help='debug off')
     arggroup.add_argument('--novis', dest='vis', action='store_false', help='visualizer off')
     arggroup.add_argument('--release', dest='release', action='store_true', help='debug off, visualizer off')
+    arggroup = parser.add_argument_group('visualizer options')
+    arggroup.add_argument('--vis-sixel', action='store_true', help='use sixel with visualizer')
+    #arggroup.add_argument('--vis-pipe', action='store_true', help='use pipe with visualizer')
     arggroup = parser.add_argument_group('using atcoder-tools')
     arggroup.add_argument('--ac-gen', action='store_true', help='generate code using atcoder-tools')
     arggroup.add_argument('--ac-test', action='store_true', help='test using atcoder-tools')

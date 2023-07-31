@@ -10,6 +10,12 @@ public:
             *pointer = o;
         }
     }
+    inline void operator = (const xref<T> & o) {
+        if(*pointer!=*o.pointer) {
+            xmem::modify(pointer, sizeof(T));
+            *pointer = *o.pointer;
+        }
+    }
     inline void operator += (const T & o) {
         T v = *pointer + o;
         if(*pointer!=v) {
@@ -88,3 +94,10 @@ public:
         return *pointer;
     }
 };
+namespace std {
+    template<class T, class T2> void swap(xref<T> a, xref<T2> b) {
+        T c = a;
+        a = b;
+        b = c;
+    }
+}

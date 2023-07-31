@@ -3,7 +3,7 @@ private:
     fast_array<T, N> data_;
 public:
     inline xarray() {
-        xmem::init(this);
+        xmem::init(this, sizeof(*this));
     }
     inline void set(int i, const T & o) {
         assert(0<=i && i<N);

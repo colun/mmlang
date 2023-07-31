@@ -11,7 +11,7 @@ private:
 public:
     inline xdeque() : start(0), count(0) {
         if(use_xmem) {
-            xmem::init(this);
+            xmem::init(this, sizeof(*this));
         }
     }
     inline void set(int i, const T & o) {

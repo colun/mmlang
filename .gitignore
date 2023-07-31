@@ -1,2 +1,3 @@
 build
 mmlang.egg-info
+*.pyc

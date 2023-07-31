@@ -2,6 +2,7 @@ struct gvRGB {
     int r;
     int g;
     int b;
+    gvRGB() : r(0), g(0), b(0) {}
     gvRGB(int r, int g, int b) : r(r), g(g), b(b) {
     }
     gvRGB(const std::vector<int> & rgb) : r(rgb[0]), g(rgb[1]), b(rgb[2]) {
@@ -10,6 +11,33 @@ struct gvRGB {
         return ((r & 255) << 16) | ((g & 255) << 8) | (b & 255);
     }
 };
+gvRGB gvHSB(double h, double s, double b) {
+    assert(0<=s && s<=1.0);
+    assert(0<=b && b<=1.0);
+    h -= (int)h;
+    if(h<0) {
+        h += 1;
+    }
+    h *= 6;
+    int h1 = (int)h;
+    h -=  (int)h;
+    double p = b * (1-s);
+    double q = b * (1-s*h);
+    double t = b * (1-s*(1-h));
+    switch(h1) {
+        case 0:
+            return gvRGB((int)(b * 255 + 0.5), (int)(t * 255 + 0.5), (int)(p * 255 + 0.5));
+        case 1:
+            return gvRGB((int)(q * 255 + 0.5), (int)(b * 255 + 0.5), (int)(p * 255 + 0.5));
+        case 2:
+            return gvRGB((int)(p * 255 + 0.5), (int)(b * 255 + 0.5), (int)(t * 255 + 0.5));
+        case 3:
+            return gvRGB((int)(p * 255 + 0.5), (int)(q * 255 + 0.5), (int)(b * 255 + 0.5));
+        case 4:
+            return gvRGB((int)(t * 255 + 0.5), (int)(p * 255 + 0.5), (int)(b * 255 + 0.5));
+    }
+    return gvRGB((int)(b * 255 + 0.5), (int)(p * 255 + 0.5), (int)(q * 255 + 0.5));
+}
 #ifdef MM$VIS
 FILE * gv$file = NULL;
 bool gv$flushFlag = true;

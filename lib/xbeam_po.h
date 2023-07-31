@@ -131,6 +131,8 @@ struct xbeam_po {
     int infoDepthAcceptCount;
     int infoLoopCount;
     int infoDepthLoopCount;
+    int infoLoopCount2;
+    int infoDepthLoopCount2;
     int infoDepth;
     int skip_count;
     double infoStartTime;
@@ -163,6 +165,8 @@ struct xbeam_po {
         infoDepthAcceptCount = 0;
         infoLoopCount = 0;
         infoDepthLoopCount = 0;
+        infoLoopCount2 = 0;
+        infoDepthLoopCount2 = 0;
         infoDepth = 0;
         skip_count = 0;
         remain_depth = max_depth_;
@@ -174,8 +178,7 @@ struct xbeam_po {
             infoDepthStartTime = infoStartTime = t;
         }
         reserves.clear();
-        nmem.free2();
-        nmem.free2();
+        nmem.free();
         for(int i=0; i<rankings.size(); ++i) {
             clear_ranking(i);
         }
@@ -188,7 +191,7 @@ struct xbeam_po {
     void dest_(double t) {
         xmem::unlock();
         if(verboseFlag) {
-            fprintf(stderr, "xbeam_po(all): %.3f->%.3f(%.6fs) %d/%d ... %.1fa/s\n\n", infoStartTime, t, t-infoStartTime, infoAcceptCount, infoLoopCount, infoAcceptCount/(t-infoStartTime));
+            fprintf(stderr, "beam_po(all): %.3f->%.3f(%.6fs) %d/%d(%d) ... %.1fa/s\n\n", infoStartTime, t, t-infoStartTime, infoAcceptCount, infoLoopCount, infoLoopCount+infoLoopCount2, infoAcceptCount/(t-infoStartTime));
         }
         xbeam_po$node * cn = current_node;
         while(current_node) {
@@ -201,11 +204,12 @@ struct xbeam_po {
     }
     void infoForNextDepth_(double t) {
         if(verboseFlag && 1<=infoLoopCount-infoDepthLoopCount) {
-            fprintf(stderr, "xbeam_po(%3d): %.3f->%.3f(%.6fs) %d/%d ... %.1fa/s\n", infoDepth, infoDepthStartTime, t, t-infoDepthStartTime, infoAcceptCount-infoDepthAcceptCount, infoLoopCount-infoDepthLoopCount, (infoAcceptCount-infoDepthAcceptCount)/(t-infoDepthStartTime));
+            fprintf(stderr, "beam_po(%3d): %.3f->%.3f(%.6fs) %d/%d(%d) ... %.1fa/s\n", infoDepth, infoDepthStartTime, t, t-infoDepthStartTime, infoAcceptCount-infoDepthAcceptCount, infoLoopCount-infoDepthLoopCount, infoLoopCount+infoLoopCount2-infoDepthLoopCount-infoDepthLoopCount2, (infoAcceptCount-infoDepthAcceptCount)/(t-infoDepthStartTime));
         }
         infoDepthStartTime = t;
         infoDepthAcceptCount = infoAcceptCount;
         infoDepthLoopCount = infoLoopCount;
+        infoDepthLoopCount2 = infoLoopCount2;
         ++infoDepth;
     }
     void transit_(xbeam_po$node * current_node, xbeam_po$node * next_node) {
@@ -299,7 +303,7 @@ struct xbeam_po {
             current_node->addRef();
             assert(next_node->input);
             input_mem = next_node->input + (sizeof(char*) + sizeof(double) + sizeof(double));
-            ++infoLoopCount;
+            ++infoLoopCount2;
             return true;
         }
         else {
@@ -414,7 +418,6 @@ struct xbeam_po {
             }
         }
         assert(next_node);
-        next_node->addRef();
         assert(next_node->input);
         ranking.emplace(next_node->getScore(), next_node);
         next_node = (xbeam_po$node*)-1;
