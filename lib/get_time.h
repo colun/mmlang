@@ -3,13 +3,16 @@ unsigned long long getTime$reserveUpdateCpuClock;
 double getTime$initNativeTime;
 double getTime$secPerClock;
 double getTime$doneTime;
+inline void initTime() {
+    getTime$initNativeTime = getNativeTime();
+    getCpuClock(getTime$initCpuClock);
+    getTime$secPerClock = 0.00000000025;
+    getTime$reserveUpdateCpuClock = 10000000;
+    getTime$doneTime = 0;
+}
 struct getTime$init_class {
     inline getTime$init_class() {
-        getTime$initNativeTime = getNativeTime();
-        getCpuClock(getTime$initCpuClock);
-        getTime$secPerClock = 0.00000000025;
-        getTime$reserveUpdateCpuClock = 10000000;
-        getTime$doneTime = 0;
+        initTime();
     }
 };
 getTime$init_class getTime$init_obj;

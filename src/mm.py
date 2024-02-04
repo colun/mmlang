@@ -80,6 +80,10 @@ def compile_raw(args):
         tree = parser.parse(args.source)
         tree = expand(tree)
         tree.start(args.source_name, args.profiler, args.sa_profiler, args.pybind11)
+    except lark.UnexpectedToken as e:
+        print(f"\nsyntax error ... line: {e.line}, column: {e.column}")
+        print(args.source.split("\n")[e.line-1])
+        print(" "*(e.column-1) + "~")
     except Exception as e:
         info = sys.exc_info()
         #sys.excepthook(*info)
@@ -98,7 +102,7 @@ def compile_raw(args):
                 tb = tb.tb_next
             else:
                 break
-        print('%s: %s' % (info[0].__name__, info[1]))
+        print('%s(%s): %s' % (info[0].__name__, type(e), info[1]))
 
 
 def test_exec_atcoder(args, url, task_dir, main_id):

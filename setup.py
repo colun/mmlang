@@ -16,7 +16,7 @@ setuptools.setup(
     include_package_data=True,
     install_requires=[
         'psutil',
-        'lark-parser',
+        'lark',
         'colorama',
         'atcoder-tools',
         'markupsafe==2.0.1',
