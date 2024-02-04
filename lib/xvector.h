@@ -248,6 +248,10 @@ public:
         assert(0<=i && i<count);
         return data_[i];
     }
+    inline xvector<T, N, use_xmem> & operator = (std::vector<T> & o) {
+        assign(o.begin(), o.end());
+        return *this;
+    }
     bool in_array_slow(const T & value) const {
         for(int i=0; i<count; ++i) {
             if unlikely(data_[i]==value) {

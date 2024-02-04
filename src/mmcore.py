@@ -195,7 +195,9 @@ def isComprehensionType(ty0, ty1):
         return True
     assert not isinstance(ty0, tuple)
     assert not isinstance(ty1, tuple)
-    if isinstance(ty0, Template):
+    if ty0 in ['string']:
+        return True
+    if isinstance(ty0, Template) and ty1 not in ['string']:
         return True
     if ty0 != 'auto' and ty1 == 'auto':
         return True
@@ -285,6 +287,7 @@ def toStrBoundArg(containerTy, args, upper_flag):
                 exprs.append('get<%s>(%s)' % (i, args[0]))
             else:
                 exprs.append(getMinMaxValueExpr(itemTy.args[i], upper_flag))
+        itemTy.args = itemTy.args[:len(exprs)]
         return '%s(%s)' % (typeToStr(itemTy), ', '.join(exprs))
     exprs = []
     for i in range(len(itemTy.args)):
@@ -306,7 +309,7 @@ class CodeContext:
         self._indent = 0
         self.tabed = False
 
-        self.used_includes = ['cassert', 'vector', 'deque', 'string', 'map', 'queue', 'stack', 'algorithm', 'type.h']
+        self.used_includes = ['cassert', 'vector', 'deque', 'string', 'map', 'unordered_map', 'queue', 'stack', 'algorithm', 'type.h']
         self.used_defines = []
         self.breaks = []
         self.breaks_used = []
@@ -983,11 +986,14 @@ class group_node(base_node):
                 context = parentContext
             elif isinstance(child, node_funcdef):
                 child.visit('visitBindSymbol', childrenMethods='getChildNodesWithoutSuite')
+                child.defineSelf()
                 parentContext = context
                 context = Context(parentContext, scopeLevel=0)
                 child.defines()
                 context = parentContext
             elif isinstance(child, node_classdef):
+                child.visit('visitBindSymbol', childrenMethods='getChildNodesWithoutSuite')
+                child.defineSelf()
                 parentContext = context
                 context = Context(parentContext, scopeLevel=0)
                 child.defines()
@@ -1082,7 +1088,7 @@ class group_node(base_node):
                         context.print('bool %s = false;' % (name, ))
                     elif func_name == 'all':
                         context.print('bool %s = true;' % (name, ))
-                    elif func_name in ['sum', 'mean']:
+                    elif func_name in ['sum', 'xor', 'mean']:
                         context.print('%s %s = %s;' % ('int' if ty == 'bool' else ty, name, init_value))
                     else:
                         context.print('%s %s = %s;' % (ty, name, init_value))
@@ -1107,6 +1113,8 @@ class group_node(base_node):
                         context.print('if(!(%s)) { %s = false; break; }' % (arg, name))
                     elif func_name == 'sum':
                         context.print('%s += %s;' % (name, arg))
+                    elif func_name == 'xor':
+                        context.print('%s ^= %s;' % (name, arg))
                     elif func_name == 'mean':
                         context.print('{ %s += %s; ++%s$cnt; }' % (name, arg, name))
                     elif func_name in ['median', 'count_uniques']:
@@ -1491,6 +1499,9 @@ class node_funcdef(base_node):
     def toStr(self):
         TODO
 
+    def defineSelf(self):
+        pass
+
     def defines(self):
         for param in self.parameters:
             param.defines()
@@ -1837,11 +1848,14 @@ class node_classdef(base_node):
     def toStr(self):
         TODO
 
+    def defineSelf(self):
+        pass
+
     def defines(self):
         self.suite.defines()
 
     def getChildNodesWithoutSuite(self):
-        return self.decorators
+        return self.decorators if self.parent_class is None else self.decorators + [self.parent_class]
 
     def getSuiteChildNodes(self):
         return [self.suite]
@@ -2399,7 +2413,7 @@ class call_node(base_node):
 
     def getType(self):
         if self.node_type == 'funccall':
-            if isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'mean', 'median', 'move'] and len(self.args) == 1:
+            if isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'xor', 'mean', 'median', 'move'] and len(self.args) == 1:
                 return self.args[0].getType()
             if isinstance(self.func, node_var) and self.func.name in ['count_trues', 'count_uniques', 'count_changes'] and len(self.args) == 1:
                 return 'int'
@@ -2416,7 +2430,7 @@ class call_node(base_node):
             ty = self.func.getType()
             if isinstance(ty, Template) and ty.name in ['vector', 'deque', 'BIT'] and 1 <= len(ty.args):
                 return ty.args[0]
-            if isinstance(ty, Template) and ty.name in ['map'] and 2 <= len(ty.args):
+            if isinstance(ty, Template) and ty.name in ['map', 'unordered_map'] and 2 <= len(ty.args):
                 return ty.args[1]
             if ty == 'string':
                 return 'char'
@@ -2468,7 +2482,7 @@ class call_node(base_node):
         return [self.func] + list(self.args)
 
     def getChildNodesForBind(self):
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'median'] and len(self.args) == 1:
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'median'] and len(self.args) == 1:
             return [self.func]
         else:
             return [self.func] + list(self.args)
@@ -2481,7 +2495,7 @@ class call_node(base_node):
                 self.func.obj.reserveBind()
             elif self.func.member in ['eq_to_end', 'eq_to_rend']:
                 self.func.obj.reserveBind()
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'median'] and len(self.args) == 1:
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'median'] and len(self.args) == 1:
             self.reserveBind()
             if self.func.name in ['min', 'max']:
                 self.args[0].reserveBind()
@@ -2495,7 +2509,7 @@ class call_node(base_node):
             return self.func.printResize(size, name)
 
     def isAggregateFunc(self):
-        return self.node_type == 'funccall' and str(self.func) in ['min', 'max', 'sum', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'median'] and len(self.args) == 1
+        return self.node_type == 'funccall' and str(self.func) in ['min', 'max', 'sum', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'median'] and len(self.args) == 1
 
 
 call_dic = {
@@ -2700,7 +2714,7 @@ class op2_node(base_node):
             return '(%s)' % ' && '.join('%s %s %s' % (self.args[i], self.args[i + 1], self.args[i + 2]) for i in range(0, len(self.args) - 2, 2))
         if self.node_type == 'comparison' and len(self.args) == 3 and self.args[1] in ['in', 'not in']:
             ty = self.args[2].getType()
-            if isinstance(ty, Template) and ty.name in ['set', 'multiset']:
+            if isinstance(ty, Template) and ty.name in ['set', 'multiset', 'map', 'multimap', 'unordered_map']:
                 return '%s.find(%s)%s%s.end()' % (self.args[2], self.args[0], '==' if self.args[1] == 'not in' else '!=', self.args[2])
             if isinstance(ty, Template) and ty.name in ['vector']:
                 return 'find(%s.begin(), %s.end(), %s)%s%s.end()' % (self.args[2], self.args[2], self.args[0], '==' if self.args[1] == 'not in' else '!=', self.args[2])

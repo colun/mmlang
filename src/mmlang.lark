@@ -1,41 +1,41 @@
 start: _NEWLINE? stmt*
 ?stmt: multi_stmt | if_stmt | while_stmt | for_stmt | funcdef | classdef
-?multi_stmt: single_stmt (";" single_stmt)* [";"] _NEWLINE
+?multi_stmt: single_stmt (";" single_stmt)* (";")? _NEWLINE
 ?single_stmt: assign | pass_stmt | break_stmt | continue_stmt | return_stmt | assert_stmt
 
 pass_stmt: "pass"
 break_stmt: "break"
 continue_stmt: "continue"
-return_stmt: "return" [assign]
-assert_stmt: "assert" test ["," test]
+return_stmt: "return" (assign)?
+assert_stmt: "assert" test ("," test)?
 
-if_stmt: "if" test ":" suite ("elif" test ":" suite)* ["else" ":" suite]
-while_stmt: "while" test ":" suite ["else" ":" suite]
-for_stmt: decorator* "for" [noinstant_tuple "in"] noinstant_tuple ":" suite ["else" ":" suite]
+if_stmt: "if" test ":" suite ("elif" test ":" suite)* ("else" ":" suite)?
+while_stmt: "while" test ":" suite ("else" ":" suite)?
+for_stmt: decorator* "for" (noinstant_tuple "in")? noinstant_tuple ":" suite ("else" ":" suite)?
 suite: multi_stmt | _NEWLINE _INDENT stmt+ _DEDENT
 
-funcdef: decorator* "def" var "(" parameters? ")" ["->" test] ":" suite
-decorator: "@" var [ "(" [arguments] ")" ] _NEWLINE
+funcdef: decorator* "def" var "(" parameters? ")" ("->" test)? ":" suite
+decorator: "@" var ( "(" (arguments)? ")" )? _NEWLINE
 parameters: paramvalue ("," paramvalue)*
-?paramvalue: typedparam ["=" test]
-typedparam: var [":" (referencedtype|test)]
+?paramvalue: typedparam ("=" test)?
+typedparam: var (":" (referencedtype|test))?
 referencedtype: "&" test
 ?arguments: argvalue ("," argvalue)*
-?argvalue: test ["=" test]
+?argvalue: test ("=" test)?
 
-classdef: decorator* "class" var ["(" var ")" ] ":" suite
+classdef: decorator* "class" var ("(" var ")" )? ":" suite
 
-?assign: tuple (assign_op tuple)* [mod]
+?assign: tuple (assign_op tuple)* (mod)?
 !assign_op: "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" | "**=" | "//=" | "<?=" | ">?="
 mod: "mod" test
 
-?if_suffix: tuple ["if" test]
+?if_suffix: tuple ("if" test)?
 
-?tuple: instant ("," instant)* [","]
-?noinstant_tuple: bit_or ("," bit_or)* [","]
-instant: test (instant_op [test])* | (instant_op [test])+
+?tuple: instant ("," instant)* (",")?
+?noinstant_tuple: bit_or ("," bit_or)* (",")?
+instant: test (instant_op (test)?)* | (instant_op (test)?)+
 !instant_op: "@"|":"
-?test: logical_or ["?" logical_or ":" test]
+?test: logical_or ("?" logical_or ":" test)?
 ?logical_or: logical_and ("or" logical_and)*
 ?logical_and: logical_not_wrap ("and" logical_not_wrap)*
 ?logical_not_wrap: logical_not | comparison
@@ -75,9 +75,9 @@ bit_not: "~" prefix
        | post_dec
        | atom
 
-funccall: suffix "(" [if_suffix] ")"
+funccall: suffix "(" (if_suffix)? ")"
 getitem: suffix "[" assign "]"
-template: suffix "!" "(" [tuple] ")"
+template: suffix "!" "(" (tuple)? ")"
 getattr: suffix "." var
 post_inc: suffix "++"
 post_dec: suffix "--"
