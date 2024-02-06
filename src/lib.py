@@ -81,7 +81,7 @@ func_definition = {
     'gvTextLeft': (None, 'gv.h'),
     'gvTextRight': (None, 'gv.h'),
     'gvArrow': (None, 'gv.h'),
-    'gvLog': (None, 'gv.h'),
+    'gvOutput': (None, 'gv.h'),
     'gvInput': (None, 'gv.h'),
     'gvInputIsMessage': ('bool', 'gv.h'),
     'gvInputWord': ('string', 'gv.h'),

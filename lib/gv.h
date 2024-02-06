@@ -4,9 +4,9 @@ struct gvRGB {
     int g;
     int b;
     gvRGB() : a(0), r(0), g(0), b(0) {}
-    gvRGB(int r, int g, int b, int a=0) : r(r), g(g), b(b), a(a) {
+    gvRGB(int r, int g, int b, int a=0) : a(a), r(r), g(g), b(b) {
     }
-    gvRGB(const std::vector<int> & rgb) : r(rgb[0]), g(rgb[1]), b(rgb[2]), a(4<=rgb.size() ? rgb[3] : 0) {
+    gvRGB(const std::vector<int> & rgb) : a(4<=rgb.size() ? rgb[3] : 0), r(rgb[0]), g(rgb[1]), b(rgb[2]) {
     }
     int toInt() const {
         return ((a & 255) << 24) | ((r & 255) << 16) | ((g & 255) << 8) | (b & 255);
@@ -433,7 +433,7 @@ int gvInputInt() {
 double gvInputFloat() {
     return atof(gvInputWord().c_str());
 }
-void gvLog(const char * format = "?", ...) {
+void gvOutput(const char * format = "?", ...) {
     gvInit();
     fprintf(gv$file, "o ");
     va_list arg;
@@ -454,4 +454,7 @@ void gvLog(const char * format = "?", ...) {
 #define gvTextLeft(...)
 #define gvLine(...)
 #define gvArrow(...)
+#define gvRollback(...)
+#define gvRollbackAll(...)
+#define gvOutput(...)
 #endif
