@@ -23,12 +23,14 @@ double getTime$rate = 1.0;
 bool getTime$stopFlag = false;
 double getTime$correct = 0.0;
 #endif
-inline void setLocalTimeRate(double rate) {
 #if __local__
+inline void setLocalTimeRate(double rate) {
     getTime$rate = rate;
     getTime$revRate = 1.0 / rate;
-#endif
 }
+#else
+#define setLocalTimeRate(...)
+#endif
 
 inline double getTime() {
 #if __local__
@@ -69,9 +71,11 @@ inline void getTimeStart() {
     }
 #endif
 }
-inline void setTime(double t) {
 #if __local__
+inline void setTime(double t) {
     getTime$correct += t - getTime();
     getTime$doneTime = t;
-#endif
 }
+#else
+#define setTime(...)
+#endif
