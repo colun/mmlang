@@ -154,7 +154,8 @@ dependency = {
     'mrand49.h': ['asm_mul_hi.h'],
     'mmrand49.h': ['mrand49.h'],
     'sarand49.h': ['mrand49.h'],
-    'gv.h': ['vector', 'cstdarg', 'cmath', 'unistd.h', 'get_time.h'],
+    'wrand49.h': ['drand49.h'],
+    'gv.h': ['vector', 'cstdarg', 'cmath', 'unistd.h', 'mm_emscripten.h', 'get_time.h'],
     'logit.h': ['cmath'],
     'sigmoid.h': ['cmath'],
     'profiler.h': ['cstdio', 'map', 'thread', 'get_cpu_clock.h', 'signal.h'],
@@ -172,10 +173,21 @@ dependency = {
     'Conv2d.h': ['decode_ndarray.h'],
     'ConvTranspose2d.h': ['decode_ndarray.h'],
     'BatchNorm2d.h': ['decode_ndarray.h'],
+    'FileReader.h': ['cassert', 'string', 'cstdio', 'cstring'],
+    'mm_emscripten.h': [],
 }
 nocompress = set([
 ])
 class_definition = {
+    'FileReader': ({
+        'open': None,
+        'inputLine': 'string',
+        'inputWord': 'string',
+        'inputFloat': 'double',
+        'inputInt': 'int',
+        'inputInt64': 'long long',
+        'inputInt128': '__int128',
+    }, 'FileReader.h'),
     'EulerTourTree': ({
         'is_connected': 'bool',
         'is_direct_connected': 'bool',
@@ -362,4 +374,18 @@ class_definition = {
     }, 'Conv2d.h'),
     'ConvTranspose2d': ({
     }, 'ConvTranspose2d.h'),
+    'wrand49': ({
+        'clear': None,
+        'add': None,
+        'build': None,
+        'choice': '$1',
+    }, 'wrand49.h'),
+    'string': ({
+        'empty': 'bool',
+        'size': 'size_t',
+    }, 'string'),
+    'unionfind': ({
+        'unite': None,
+        'root': 'int',
+    }, 'unionfind.h'),
 }

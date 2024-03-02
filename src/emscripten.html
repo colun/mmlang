@@ -1,0 +1,1480 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="google" content="notranslate">
+        <title></title>
+        <script>
+"use strict";
+var TODO = false;
+var createSvgElement = function(tag) {
+    return document.createElementNS("http://www.w3.org/2000/svg", tag);
+};
+var renewElement = function(ele) {
+    var clone = ele.cloneNode(false);
+    ele.parentNode.replaceChild(clone, ele);
+    return clone;
+};
+var ARGB = function(color) {
+    var c = BigInt(color);
+    var a = (255 - parseInt((c>>BigInt(24)) & BigInt(255))) / 255.0;
+    var rgb = "#" + parseInt(c & BigInt(0xFFFFFF)).toString(16).padStart(6, "0");
+    return [a, rgb];
+}
+var ARGBrev = function(color) {
+    var c = BigInt(color);
+    var a = (255 - parseInt((c>>BigInt(24)) & BigInt(255))) / 255.0;
+    var rgbValue = parseInt(c & BigInt(0xFFFFFF));
+    var rgb = "#" + rgbValue.toString(16).padStart(6, "0");
+    var rev = "#" + (((rgbValue & 0xFF0000)<0x800000 ? 0xFF0000 : 0) | ((rgbValue & 0xFF00)<0x8000 ? 0xFF00 : 0) | ((rgbValue & 0xFF)<0x80 ? 0xFF : 0)).toString(16).padStart(6, "0");
+    return [a, rgb, rev];
+}
+var root5 = Math.sqrt(5);
+var root1_5 = 1 / root5;
+var gvInit = function(ws_send) {
+    if(window.location.pathname!="/") {
+        document.title = decodeURIComponent(window.location.pathname.substring(1));
+    }
+    var screen = document.getElementsByClassName("screen")[0];
+    var touch_screen = document.getElementsByClassName("touch_screen")[0];
+    var consoleEle = document.getElementsByClassName("console")[0];
+    var pagesEle = document.getElementsByClassName("pages")[0];
+    var snapNameEle = document.getElementsByClassName("snap_name")[0];
+    var nowSnapEle = document.getElementsByClassName("now_snap")[0];
+    var totalSnapEle = document.getElementsByClassName("total_snap")[0];
+    var drawTimeEle = document.getElementsByClassName("draw_time")[0];
+    var svg = createSvgElement("svg");
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "100%");
+    screen.appendChild(svg);
+    var measure = createSvgElement("text");
+    measure.setAttribute("x", -1000);
+    measure.setAttribute("y", -1000);
+    measure.setAttribute("text-anchor", "middle");
+    measure.setAttribute("font-size", 1);
+    measure.setAttribute("stroke", "#000000");
+    measure.setAttribute("stroke-width", 0.01);
+    measure.setAttribute("stroke-linejoin", "round");
+    measure.setAttribute("fill", "#FF0000");
+    measure.setAttribute("stroke-opacity", 0);
+    measure.setAttribute("fill-opacity", 0);
+    measure.setAttribute("pointer-events", "none");
+    svg.appendChild(measure);
+    var background = createSvgElement("g");
+    svg.appendChild(background);
+    var canvas = createSvgElement("g");
+    svg.appendChild(canvas);
+    var drawed = createSvgElement("g");
+    svg.appendChild(drawed);
+    var drawing = createSvgElement("g");
+    svg.appendChild(drawing);
+    var foreground = createSvgElement("g");
+    svg.appendChild(foreground);
+    var links = [];
+    var link_over_id = null;
+    var link_over_ele = null;
+    var input_mode = false;
+    var newState = function() {
+        return {
+            minX: Number.MAX_VALUE,
+            maxX: -Number.MAX_VALUE,
+            minY: Number.MAX_VALUE,
+            maxY: -Number.MAX_VALUE,
+            nowTime: null,
+            nextTime: 0,
+            _: 0
+        };
+    };
+    var copyState = function(state) {
+        return {
+            minX: state.minX,
+            maxX: state.maxX,
+            minY: state.minY,
+            maxY: state.maxY,
+            nowTime: state.nowTime,
+            nextTime: state.nextTime,
+            _: 0
+        };
+    };
+    var state = newState();
+    var zoom = copyState(state);
+    var updateViewBox = function() {
+        if(zoom.minX<zoom.maxX && zoom.minY<zoom.maxY) {
+            svg.setAttribute("viewBox", zoom.minX + " " + zoom.minY + " " + (zoom.maxX-zoom.minX) + " " + (zoom.maxY-zoom.minY));
+        }
+        else {
+            svg.setAttribute("viewBox", "0 0 1 1");
+        }
+    };
+    updateViewBox();
+    var measureTextWidthRaw = function(text) {
+        measure.textContent = text;
+        return measure.getBBox().width;
+    }
+    var measureCache = {};
+    var measure00 = measureTextWidthRaw("00");
+    var measureSide = measureTextWidthRaw("0") * 2 - measure00;
+    var measureCharWidth = function(ch) {
+        var ret = measureCache[ch];
+        if(ret===undefined) {
+            measureCache[ch] = ret = measureTextWidthRaw("0" + ch + "0") - measure00;
+        }
+        return ret;
+    }
+    var measureTextWidth = function(text) {
+        var ret = measureSide;
+        var L = text.split("");
+        for(var i=0; i<L.length; ++i) {
+            ret += measureCharWidth(L[i]);
+        }
+        return ret;
+    }
+    var outputs = [];
+    var outputsFlag = false;
+    var updateOutputs = function() {
+        if(outputsFlag) {
+            outputsFlag = false;
+            consoleEle.textContent = outputs.join("\n");
+        }
+    };
+    var reserveUpdateOutputs = function() {
+        if(outputsFlag==false) {
+            outputsFlag = true;
+        }
+    };
+    var stateForZoom = null;
+    var updateZoom = function() {
+        if(stateForZoom!=null) {
+            if(zoom.minX==stateForZoom.minX && zoom.maxX==stateForZoom.maxX && zoom.minY==stateForZoom.minY && zoom.maxY==stateForZoom.maxY) {
+                zoom = copyState(state);
+                updateViewBox();
+            }
+            stateForZoom = null;
+        }
+    };
+    var reserveUpdateZoom = function() {
+        if(stateForZoom==null) {
+            stateForZoom = copyState(state);
+        }
+    };
+    var initScreen = function() {
+        background = renewElement(background);
+        canvas = renewElement(canvas);
+        foreground = renewElement(foreground);
+        outputs = [];
+        links = [];
+        link_over_id = null;
+        link_over_ele = null;
+        reserveUpdateOutputs();
+    };
+    var updateXY = function(minX, maxX, minY, maxY) {
+        if(minX < state.minX) {
+            reserveUpdateZoom();
+            state.minX = minX;
+        }
+        if(state.maxX < maxX) {
+            reserveUpdateZoom();
+            state.maxX = maxX;
+        }
+        if(minY < state.minY) {
+            reserveUpdateZoom();
+            state.minY = minY;
+        }
+        if(state.maxY < maxY) {
+            reserveUpdateZoom();
+            state.maxY = maxY;
+        }
+    };
+    document.addEventListener("wheel", function(e) {
+        if(state.minX<=state.maxX && state.minY<=state.maxY) {
+            if(e.deltaY % 1 && e.deltaX==0) {
+                if(e.deltaY<0) {
+                    e.preventDefault();
+                }
+                var w = zoom.maxX-zoom.minX;
+                var h = zoom.maxY-zoom.minY;
+                var scaleToClient = Math.min(svg.clientWidth / w, svg.clientHeight / h);
+                var scaleToSvg = Math.max(w / svg.clientWidth, h / svg.clientHeight);
+                var clientLeft = (svg.clientWidth - w * scaleToClient) * 0.5;
+                var clientTop = (svg.clientHeight - h * scaleToClient) * 0.5;
+                var x = (e.clientX - clientLeft) * scaleToSvg + zoom.minX;
+                var y = (e.clientY - clientTop) * scaleToSvg + zoom.minY;
+                var limitScaleToSvg = Math.max((state.maxX-state.minX) / svg.clientWidth, (state.maxY-state.minY) / svg.clientHeight) * 0.1;
+                var newScaleToSvg = Math.max(scaleToSvg * Math.pow(1.01, e.deltaY), limitScaleToSvg);
+                var newMinX = x - e.clientX * newScaleToSvg;
+                var newMaxX = newMinX + svg.clientWidth * newScaleToSvg;
+                var newMinY = y - e.clientY * newScaleToSvg;
+                var newMaxY = newMinY + svg.clientHeight * newScaleToSvg;
+                zoom = {minX: Math.max(state.minX, newMinX), maxX: Math.min(state.maxX, newMaxX), minY: Math.max(state.minY, newMinY), maxY: Math.min(state.maxY, newMaxY)};
+            }
+            else {
+                e.preventDefault();
+                var w = zoom.maxX-zoom.minX;
+                var h = zoom.maxY-zoom.minY;
+                var scaleToClient = Math.min(svg.clientWidth / w, svg.clientHeight / h);
+                var scaleToSvg = Math.max(w / svg.clientWidth, h / svg.clientHeight);
+                var newMinX = zoom.minX;
+                var newMaxX = zoom.maxX;
+                var newMinY = zoom.minY;
+                var newMaxY = zoom.maxY;
+                if(0<e.deltaX) {
+                    newMaxX = Math.min(state.maxX, newMaxX + e.deltaX * scaleToSvg);
+                    if(newMaxX!=zoom.maxX) {
+                        newMinX = Math.max(state.minX, newMaxX - w); 
+                    }
+                }
+                else {
+                    newMinX = Math.max(state.minX, newMinX + e.deltaX * scaleToSvg);
+                    if(newMinX!=zoom.minX) {
+                        newMaxX = Math.min(state.maxX, newMinX + w); 
+                    }
+                }
+                if(0<e.deltaY) {
+                    newMaxY = Math.min(state.maxY, newMaxY + e.deltaY * scaleToSvg);
+                    if(newMaxY!=zoom.maxY) {
+                        newMinY = Math.max(state.minY, newMaxY - h); 
+                    }
+                }
+                else {
+                    newMinY = Math.max(state.minY, newMinY + e.deltaY * scaleToSvg);
+                    if(newMinY!=zoom.minY) {
+                        newMaxY = Math.min(state.maxY, newMinY + h); 
+                    }
+                }
+                zoom = {minX: newMinX, maxX: newMaxX, minY: newMinY, maxY: newMaxY};
+                window.scrollBy(e.deltaX, e.deltaY);
+            }
+            updateViewBox();
+        }
+    }, { passive: false });
+    document.addEventListener("touchmove", function(e) {
+        e.preventDefault();
+    }, { passive: false });
+    var savedState = copyState(state);
+    var buildSnapItem = function(line, tokens, type, beforeLine, isDraw) {
+        if(type=="c") {
+            console.assert(3<=tokens.length);
+            var cx = parseFloat(tokens[1]);
+            var cy = parseFloat(tokens[2]);
+            var argb = ARGB(4<=tokens.length ? tokens[3] : "0");
+            var r = 5<=tokens.length ? parseFloat(tokens[4]) : 0.5;
+            console.assert(0<=r);
+            if(isDraw && 0<argb[0]) {
+                var ele = createSvgElement("circle");
+                ele.setAttribute("cx", cx);
+                ele.setAttribute("cy", cy);
+                ele.setAttribute("fill", argb[1]);
+                if(argb[0]<1) {
+                    ele.setAttribute("fill-opacity", argb[0]);
+                }
+                ele.setAttribute("r", r);
+                canvas.appendChild(ele);
+            }
+            updateXY(cx-r, cx+r, cy-r, cy+r);
+        }
+        else if(type=="p") {
+            console.assert(6<=tokens.length);
+            console.assert(tokens.length%2==0);
+            var argb = ARGB(2<=tokens.length ? tokens[1] : "0");
+            var ei = tokens.length/2 - 1;
+            if(isDraw && 0<argb[0] && 1<=ei) {
+                var points = [];
+                for(var i=0; i<ei; ++i) {
+                    points.push(tokens[i+i+2] + "," + tokens[i+i+3]);
+                }
+                var ele = createSvgElement("polygon");
+                ele.setAttribute("points", points.join(" "));
+                ele.setAttribute("fill", argb[1]);
+                if(argb[0]<1) {
+                    ele.setAttribute("fill-opacity", argb[0]);
+                }
+                canvas.appendChild(ele);
+            }
+            for(var i=0; i<ei; ++i) {
+                var x = parseFloat(tokens[i+i+2]);
+                var y = parseFloat(tokens[i+i+3]);
+                updateXY(x, x, y, y);
+            }
+        }
+        else if(type=="l") {
+            console.assert(5<=tokens.length);
+            var x1 = parseFloat(tokens[1]);
+            var y1 = parseFloat(tokens[2]);
+            var x2 = parseFloat(tokens[3]);
+            var y2 = parseFloat(tokens[4]);
+            var argb = ARGB(6<=tokens.length ? tokens[5] : "0");
+            var r = 7<=tokens.length ? parseFloat(tokens[6]) : 0.05;
+            if(isDraw && 0<argb[0]) {
+                var ele = createSvgElement("line");
+                ele.setAttribute("x1", x1);
+                ele.setAttribute("y1", y1);
+                ele.setAttribute("x2", x2);
+                ele.setAttribute("y2", y2);
+                ele.setAttribute("stroke", argb[1]);
+                if(argb[0]<1) {
+                    ele.setAttribute("stroke-opacity", argb[0]);
+                }
+                ele.setAttribute("stroke-width", r * 2);
+                ele.setAttribute("stroke-linecap", "round");
+                canvas.appendChild(ele);
+            }
+            updateXY(x1-r, x1+r, y1-r, y1+r);
+            updateXY(x2-r, x2+r, y2-r, y2+r);
+        }
+        else if(type=="la") {
+            console.assert(5<=tokens.length);
+            var x1 = parseFloat(tokens[1]);
+            var y1 = parseFloat(tokens[2]);
+            var x2 = parseFloat(tokens[3]);
+            var y2 = parseFloat(tokens[4]);
+            var argb = ARGB(6<=tokens.length ? tokens[5] : "0");
+            var r = 7<=tokens.length ? parseFloat(tokens[6]) : 0.05;
+            var rx = x1 - x2;
+            var ry = y1 - y2;
+            var d = Math.sqrt(rx*rx + ry*ry);//遅いhypotの高精度は不要
+            rx /= d;
+            ry /= d;
+            var rb = r * 4;
+            var rxr = rx * rb;
+            var ryr = ry * rb;
+            var x3 = x2 + (rxr+rxr) - ryr;
+            var y3 = y2 + rxr + (ryr+ryr);
+            var x4 = x2 + (rxr+rxr) + ryr;
+            var y4 = y2 - rxr + (ryr+ryr);
+            if(isDraw && 0<argb[0]) {
+                var ele = createSvgElement("polygon");
+                ele.setAttribute("points", [x1, ",", y1, " ", x2, ",", y2, " ", x3, ",", y3, " ", x2, ",", y2, " ", x4, ",", y4, " ", x2, ",", y2, " "].join(""));
+                ele.setAttribute("stroke", argb[1]);
+                ele.setAttribute("stroke-width", r * 2);
+                ele.setAttribute("stroke-linejoin", "round");
+                if(argb[0]<1) {
+                    ele.setAttribute("stroke-opacity", argb[0]);
+                }
+                canvas.appendChild(ele);
+            }
+            updateXY(x1-r, x1+r, y1-r, y1+r);
+            updateXY(x2-r, x2+r, y2-r, y2+r);
+            updateXY(x3-r, x3+r, y3-r, y3+r);
+            updateXY(x4-r, x4+r, y4-r, y4+r);
+        }
+        else if(type=="t") {
+            console.assert(3<=tokens.length);
+            var cx = parseFloat(tokens[1]);
+            var cy = parseFloat(tokens[2]);
+            var argb = ARGBrev(4<=tokens.length ? tokens[3] : "0");
+            var r = 5<=tokens.length ? parseFloat(tokens[4]) : 0.5;
+            var text = tokens.slice(5).join(" ");
+            if(isDraw && 0<argb[0]) {
+                var ele = createSvgElement("text");
+                ele.setAttribute("x", cx);
+                ele.setAttribute("y", cy + r * 0.73);
+                ele.setAttribute("text-anchor", "middle");
+                ele.setAttribute("font-size", r * 2);
+                ele.setAttribute("stroke", argb[2]);
+                ele.setAttribute("stroke-width", r * 0.02);
+                ele.setAttribute("stroke-linejoin", "round");
+                ele.setAttribute("fill", argb[1]);
+                if(argb[0]<1) {
+                    ele.setAttribute("stroke-opacity", argb[0]);
+                    ele.setAttribute("fill-opacity", argb[0]);
+                }
+                ele.setAttribute("pointer-events", "none");
+                ele.textContent = text;
+                canvas.appendChild(ele);
+            }
+            var rx = r * measureTextWidth(text);
+            updateXY(cx-rx, cx+rx, cy-r, cy+r);
+        }
+        else if(type=="tl") {
+            console.assert(3<=tokens.length);
+            var cx = parseFloat(tokens[1]);
+            var cy = parseFloat(tokens[2]);
+            var argb = ARGBrev(4<=tokens.length ? tokens[3] : "0");
+            var r = 5<=tokens.length ? parseFloat(tokens[4]) : 0.5;
+            var text = tokens.slice(5).join(" ");
+            if(isDraw && 0<argb[0]) {
+                var ele = createSvgElement("text");
+                ele.setAttribute("x", cx);
+                ele.setAttribute("y", cy + r * 0.73);
+                ele.setAttribute("text-anchor", "start");
+                ele.setAttribute("font-size", r * 2);
+                ele.setAttribute("stroke", argb[2]);
+                ele.setAttribute("stroke-width", r * 0.02);
+                ele.setAttribute("stroke-linejoin", "round");
+                ele.setAttribute("fill", argb[1]);
+                if(argb[0]<1) {
+                    ele.setAttribute("stroke-opacity", argb[0]);
+                    ele.setAttribute("fill-opacity", argb[0]);
+                }
+                ele.setAttribute("pointer-events", "none");
+                ele.textContent = text;
+                canvas.appendChild(ele);
+            }
+            var rx = r * measureTextWidth(text);
+            updateXY(cx, cx+(rx+rx), cy-r, cy+r);
+        }
+        else if(type=="tr") {
+            console.assert(3<=tokens.length);
+            var cx = parseFloat(tokens[1]);
+            var cy = parseFloat(tokens[2]);
+            var argb = ARGBrev(4<=tokens.length ? tokens[3] : "0");
+            var r = 5<=tokens.length ? parseFloat(tokens[4]) : 0.5;
+            var text = tokens.slice(5).join(" ");
+            if(isDraw && 0<argb[0]) {
+                var ele = createSvgElement("text");
+                ele.setAttribute("x", cx);
+                ele.setAttribute("y", cy + r * 0.73);
+                ele.setAttribute("text-anchor", "end");
+                ele.setAttribute("font-size", r * 2);
+                ele.setAttribute("stroke", argb[2]);
+                ele.setAttribute("stroke-width", r * 0.02);
+                ele.setAttribute("stroke-linejoin", "round");
+                ele.setAttribute("fill", argb[1]);
+                if(argb[0]<1) {
+                    ele.setAttribute("stroke-opacity", argb[0]);
+                    ele.setAttribute("fill-opacity", argb[0]);
+                }
+                ele.setAttribute("pointer-events", "none");
+                ele.textContent = text;
+                canvas.appendChild(ele);
+            }
+            var rx = r * measureTextWidth(text);
+            updateXY(cx-(rx+rx), cx, cy-r, cy+r);
+        }
+        else if(type=="b") {
+            console.assert(TODO);
+        }
+        else if(type=="o") {
+            if(isDraw) {
+                var text = tokens.slice(1).join(" ");
+                outputs.push(text);
+                reserveUpdateOutputs();
+            }
+        }
+        else if(type=="il") {
+            if(!isDraw) {
+                return;
+            }
+            var tokens2 = beforeLine.split(" ");
+            var link = line.substring(3);
+            var type2 = tokens2[0];
+            if(type2=="c") {
+                console.assert(3<=tokens2.length);
+                var cx = parseFloat(tokens2[1]);
+                var cy = parseFloat(tokens2[2]);
+                var argb = ARGBrev(4<=tokens2.length ? tokens2[3] : "0");
+                var r = 5<=tokens2.length ? parseFloat(tokens2[4]) : 0.5;
+                console.assert(0<=r);
+                var rr = r * r;
+                var func = function(x, y) {
+                    var dx = x - cx;
+                    var dy = y - cy;
+                    var dd = dx*dx + dy*dy;
+                    return dd <= rr;
+                };
+                var func2 = function() {
+                    var ele = createSvgElement("circle");
+                    ele.setAttribute("cx", cx);
+                    ele.setAttribute("cy", cy);
+                    ele.setAttribute("fill", argb[2]);
+                    ele.setAttribute("r", r);
+                    return ele;
+                };
+                links.push([func, func2, 2, link]);
+            }
+            else if(type2=="p") {
+                console.assert(6<=tokens2.length);
+                console.assert(tokens2.length%2==0);
+                var argb = ARGBrev(2<=tokens2.length ? tokens2[1] : "0");
+                var points = [];
+                var points_value = [];
+                {
+                    var ei = tokens2.length/2 - 1;
+                    for(var i=0; i<ei; ++i) {
+                        points.push(tokens2[i+i+2] + "," + tokens2[i+i+3]);
+                        points_value.push([parseFloat(tokens2[i+i+2]), parseFloat(tokens2[i+i+3])]);
+                    }
+                }
+                if(1<=points.length) {
+                    var func = null;
+                    if(4==points.length && (
+                           (points_value[0][0]==points_value[1][0] && points_value[1][1]==points_value[2][1] && points_value[2][0]==points_value[3][0] && points_value[3][1]==points_value[0][1])
+                        || (points_value[0][1]==points_value[1][1] && points_value[1][0]==points_value[2][0] && points_value[2][1]==points_value[3][1] && points_value[3][0]==points_value[0][0])
+                    )) {
+                        var min_x = Math.min(points_value[0][0], points_value[2][0]);
+                        var max_x = Math.max(points_value[0][0], points_value[2][0]);
+                        var min_y = Math.min(points_value[0][1], points_value[2][1]);
+                        var max_y = Math.max(points_value[0][1], points_value[2][1]);
+                        func = function(x, y) {
+                            return min_x<=x && x<max_x && min_y<=y && y<max_y;
+                        };
+                    }
+                    else {
+                        func = function(x, y) {
+                            var count = 0;
+                            var axy = points_value[points_value.length-1];
+                            for(var i=0; i<points_value.length; ++i) {
+                                var bxy = points_value[i];
+                                if(axy[1]<bxy[1]) {
+                                    if(axy[1]<=y && y<bxy[1] && (y-axy[1])*(bxy[0]-axy[0]) < (x-axy[0])*(bxy[1]-axy[1])) {
+                                        ++count;
+                                    }
+                                }
+                                else if(bxy[1]<axy[1]) {
+                                    if(bxy[1]<=y && y<axy[1] && (y-bxy[1])*(axy[0]-bxy[0]) < (x-bxy[0])*(axy[1]-bxy[1])) {
+                                        ++count;
+                                    }
+                                }
+                                axy = bxy;
+                            }
+                            return (count&1)==1;
+                        };
+                    }
+                    var func2 = function() {
+                        var ele = createSvgElement("polygon");
+                        ele.setAttribute("points", points.join(" "));
+                        ele.setAttribute("fill", argb[2]);
+                        return ele;
+                    };
+                    links.push([func, func2, 2, link]);
+                }
+            }
+            else if(type2=="l") {
+                console.assert(5<=tokens2.length);
+                var x1 = parseFloat(tokens2[1]);
+                var y1 = parseFloat(tokens2[2]);
+                var x2 = parseFloat(tokens2[3]);
+                var y2 = parseFloat(tokens2[4]);
+                var argb = ARGBrev(6<=tokens2.length ? tokens2[5] : "0");
+                var r = 7<=tokens2.length ? parseFloat(tokens2[6]) : 0.05;
+                var rr = r*r;
+                var rx = x1 - x2;
+                var ry = y1 - y2;
+                var d = Math.sqrt(rx*rx + ry*ry);//遅いhypotの高精度は不要
+                rx /= d;
+                ry /= d;
+                var func = function(x, y) {
+                    var dx = x - x2;
+                    var dy = y - y2;
+                    var xb = dx * rx + dy * ry;
+                    if(xb<0) {
+                        return dx*dx + dy*dy <= rr;
+                    }
+                    if(d<xb) {
+                        var dx1 = x - x1;
+                        var dy1 = y - y1;
+                        return dx1*dx1 + dy1*dy1 <= rr;
+                    }
+                    var yb = dx * ry - dy * rx;
+                    return -r<=yb && yb<=r;
+                };
+                var func2 = function() {
+                    var ele = createSvgElement("line");
+                    ele.setAttribute("x1", x1);
+                    ele.setAttribute("y1", y1);
+                    ele.setAttribute("x2", x2);
+                    ele.setAttribute("y2", y2);
+                    ele.setAttribute("stroke", argb[2]);
+                    ele.setAttribute("stroke-width", r * 2);
+                    ele.setAttribute("stroke-linecap", "round");
+                    return ele;
+                };
+                links.push([func, func2, 1, link]);
+            }
+            else if(type2=="la") {
+                console.assert(5<=tokens2.length);
+                var x1 = parseFloat(tokens2[1]);
+                var y1 = parseFloat(tokens2[2]);
+                var x2 = parseFloat(tokens2[3]);
+                var y2 = parseFloat(tokens2[4]);
+                var argb = ARGBrev(6<=tokens2.length ? tokens2[5] : "0");
+                var r = 7<=tokens2.length ? parseFloat(tokens2[6]) : 0.05;
+                var rr = r*r;
+                var rx = x1 - x2;
+                var ry = y1 - y2;
+                var d = Math.sqrt(rx*rx + ry*ry);//遅いhypotの高精度は不要
+                rx /= d;
+                ry /= d;
+                var rb = r * 4;
+                var rc = rb * root5;
+                var rxr = rx * rb;
+                var ryr = ry * rb;
+                var rx3 = rxr+rxr - ryr;
+                var ry3 = ryr+ryr + rxr;
+                var x3 = x2 + rx3;
+                var y3 = y2 + ry3;
+                var rx4 = rxr+rxr + ryr;
+                var ry4 = ryr+ryr - rxr;
+                var x4 = x2 + rx4;
+                var y4 = y2 + ry4;
+                var revRc = 1 / rc;
+                rx3 *= revRc;
+                ry3 *= revRc;
+                rx4 *= revRc;
+                ry4 *= revRc;
+                var func = function(x, y) {
+                    var dx = x - x2;
+                    var dy = y - y2;
+                    var xb = dx * rx + dy * ry;
+                    if(xb<0) {
+                        if(dx*dx + dy*dy <= rr) {
+                            return true;
+                        }
+                    }
+                    else if(d<xb) {
+                        var xx = x - x1;
+                        var yy = y - y1;
+                        if(xx*xx + yy*yy <= rr) {
+                            return true;
+                        }
+                    }
+                    else {
+                        var yb = dx * ry - dy * rx;
+                        if(-r<=yb && yb<=r) {
+                            return true;
+                        }
+                    }
+                    var xc = dx * rx3 + dy * ry3;
+                    if(rc<xc) {
+                        var xx = x - x3;
+                        var yy = y - y3;
+                        if(xx*xx + yy*yy <= rr) {
+                            return true;
+                        }
+                    }
+                    else if(0<=xc) {
+                        var yc = dx * ry3 - dy * rx3;
+                        if(-r<=yc && yc<=r) {
+                            return true;
+                        }
+                    }
+                    var xd = dx * rx4 + dy * ry4;
+                    if(rc<xd) {
+                        var xx = x - x4;
+                        var yy = y - y4;
+                        if(xx*xx + yy*yy <= rr) {
+                            return true;
+                        }
+                    }
+                    else if(0<=xc) {
+                        var yd = dx * ry4 - dy * rx4;
+                        if(-r<=yd && yd<=r) {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                var func2 = function() {
+                    var ele = createSvgElement("polygon");
+                    ele.setAttribute("points", [x1, ",", y1, " ", x2, ",", y2, " ", x3, ",", y3, " ", x2, ",", y2, " ", x4, ",", y4, " ", x2, ",", y2, " "].join(""));
+                    ele.setAttribute("stroke", argb[2]);
+                    ele.setAttribute("stroke-width", r * 2);
+                    ele.setAttribute("stroke-linejoin", "round");
+                    return ele;
+                };
+                links.push([func, func2, 1, link]);
+            }
+            else if(type2=="t") {
+                console.assert(3<=tokens2.length);
+                var cx = parseFloat(tokens2[1]);
+                var cy = parseFloat(tokens2[2]);
+                var argb = ARGBrev(4<=tokens2.length ? tokens2[3] : "0");
+                var r = 5<=tokens2.length ? parseFloat(tokens2[4]) : 0.5;
+                var text = tokens2.slice(5).join(" ");
+                var rr = r * r;
+                var rx = r * measureTextWidth(text);
+                var func = function(x, y) {
+                    var dx = x - cx;
+                    var dy = y - cy;
+                    return -rx <= dx && dx <= rx && -r <= dy && dy <= r;
+                };
+                var func2 = function() {
+                    var ele = createSvgElement("text");
+                    ele.setAttribute("x", cx);
+                    ele.setAttribute("y", cy + r * 0.73);
+                    ele.setAttribute("text-anchor", "middle");
+                    ele.setAttribute("font-size", r * 2);
+                    ele.setAttribute("stroke", argb[2]);
+                    ele.setAttribute("stroke-width", r * 0.02);
+                    ele.setAttribute("stroke-linejoin", "round");
+                    ele.setAttribute("fill", argb[2]);
+                    ele.setAttribute("pointer-events", "none");
+                    ele.textContent = text;
+                    return ele;
+                };
+                links.push([func, func2, 2, link]);
+            }
+            else if(type2=="tl") {
+                console.assert(3<=tokens2.length);
+                var cx = parseFloat(tokens2[1]);
+                var cy = parseFloat(tokens2[2]);
+                var argb = ARGBrev(4<=tokens2.length ? tokens2[3] : "0");
+                var r = 5<=tokens2.length ? parseFloat(tokens2[4]) : 0.5;
+                var text = tokens2.slice(5).join(" ");
+                var rr = r * r;
+                var rx2 = r * 2 * measureTextWidth(text);
+                var func = function(x, y) {
+                    var dx = x - cx;
+                    var dy = y - cy;
+                    return 0 <= dx && dx <= rx2 && -r <= dy && dy <= r;
+                };
+                var func2 = function() {
+                    var ele = createSvgElement("text");
+                    ele.setAttribute("x", cx);
+                    ele.setAttribute("y", cy + r * 0.73);
+                    ele.setAttribute("text-anchor", "start");
+                    ele.setAttribute("font-size", r * 2);
+                    ele.setAttribute("stroke", argb[2]);
+                    ele.setAttribute("stroke-width", r * 0.02);
+                    ele.setAttribute("stroke-linejoin", "round");
+                    ele.setAttribute("fill", argb[2]);
+                    ele.setAttribute("pointer-events", "none");
+                    ele.textContent = text;
+                    return ele;
+                };
+                links.push([func, func2, 2, link]);
+            }
+            else if(type2=="tr") {
+                console.assert(3<=tokens2.length);
+                var cx = parseFloat(tokens2[1]);
+                var cy = parseFloat(tokens2[2]);
+                var argb = ARGBrev(4<=tokens2.length ? tokens2[3] : "0");
+                var r = 5<=tokens2.length ? parseFloat(tokens2[4]) : 0.5;
+                var text = tokens2.slice(5).join(" ");
+                var rr = r * r;
+                var rx2 = r * 2 * measureTextWidth(text);
+                var func = function(x, y) {
+                    var dx = x - cx;
+                    var dy = y - cy;
+                    return -rx2 <= dx && dx <= 0 && -r <= dy && dy <= r;
+                };
+                var func2 = function() {
+                    var ele = createSvgElement("text");
+                    ele.setAttribute("x", cx);
+                    ele.setAttribute("y", cy + r * 0.73);
+                    ele.setAttribute("text-anchor", "end");
+                    ele.setAttribute("font-size", r * 2);
+                    ele.setAttribute("stroke", argb[2]);
+                    ele.setAttribute("stroke-width", r * 0.02);
+                    ele.setAttribute("stroke-linejoin", "round");
+                    ele.setAttribute("fill", argb[2]);
+                    ele.setAttribute("pointer-events", "none");
+                    ele.textContent = text;
+                    return ele;
+                };
+                links.push([func, func2, 2, link]);
+            }
+        }
+        else {
+            console.assert(TODO);
+        }
+    };
+    var snapMap = {};
+    var getSnap = function(t) {
+
+    }
+    var nowSnap = null;
+    var screenTime = null;
+    var initSnaps = function() {
+        initScreen();
+        snapMap = {};
+        nowSnap = null;
+        reserveUpdateZoom();
+        state = newState();
+        savedState = copyState(state);
+    };
+    var allowedKeys = {};
+    var updateControl = function() {
+        var keys = Object.keys(snapMap);
+        if(2<=keys.length) {
+            pagesEle.style.display = null;
+            if(screenTime.startsWith("_")) {
+                snapNameEle.textContent = "[ " + screenTime.substring(1) + " ]";
+            }
+            else {
+                snapNameEle.textContent = "";
+            }
+            nowSnapEle.innerHTML = "&nbsp;&nbsp;&nbsp;" + (keys.indexOf(screenTime)+1);
+            totalSnapEle.innerHTML = "&nbsp;&nbsp;&nbsp;" + Object.keys(snapMap).length;
+        }
+        else {
+            pagesEle.style.display = "none";
+        }
+        drawTimeEle.textContent = endTimestamp - startTimestamp;
+    }
+    var changeSnap = function(t) {
+        var snap = snapMap[t];
+        console.assert(snap!==undefined);
+        screenTime = t;
+        initScreen();
+        var snap = snapMap[screenTime];
+        for(var i=0; i<snap.length; ++i) {
+            var line2 = snap[i];
+            var tokens2 = line2.split(" ");
+            buildSnapItem(line2, tokens2, tokens2[0], i==0 ? null : snap[i-1], true);
+        }
+        updateControl();
+    };
+    nowSnapEle.addEventListener("click", function(e) {
+        var keys = Object.keys(snapMap);
+        var ret = window.prompt("page number:", keys.indexOf(screenTime)+1);
+        if(ret!==null) {
+            var page_no = parseInt(ret);
+            if(1<=page_no && page_no<=keys.length) {
+                changeSnap(keys[page_no-1]);
+            }
+        }
+    });
+    var startTimestamp = Date.now();
+    var endTimestamp =startTimestamp;
+    var newTime = function(timeName) {
+        savedState = copyState(state);
+        if(timeName!=null) {
+            state.nowTime = "_" + timeName;
+        }
+        else {
+            state.nowTime = "#" + state.nextTime;
+            ++state.nextTime;
+        }
+        nowSnap = snapMap[state.nowTime];
+        if(nowSnap===undefined) {
+            nowSnap = snapMap[state.nowTime] = [];
+            savedState.newTimeLength = null;
+        }
+        else {
+            savedState.newTimeLength = nowSnap.length;
+        }
+        savedState.newTime = state.nowTime;
+        if(screenTime===null) {
+            changeSnap(state.nowTime);
+        }
+        endTimestamp = startTimestamp = Date.now();
+    }
+    var addLine = function(line) {
+        var tokens = line.split(" ");
+        console.assert(1<=tokens.length);
+        var type = tokens[0];
+        if(type=="r") {
+            console.assert(TODO);
+            if(savedState.newTimeLength===null) {
+                delete snapMap[savedState.newTime];
+                if(screenTime==savedState.newTime) {
+                    initScreen();
+                }
+            }
+            else {
+                snapMap[savedState.newTime] = snapMap[savedState.newTime].slice(0, savedState.newTimeLength);
+                if(screenTime==savedState.newTime) {
+                    changeSnap(screenTime);
+                }
+            }
+            state = copyState(savedState);
+            nowSnap = snapMap[state.nowTime];
+            savedState.newTimeLength = nowSnap.length;
+            savedState.newTime = state.nowTime;
+        }
+        else if(type=="ra") {
+            initSnaps();
+        }
+        else if(type=="i") {
+            input_mode = true;
+        }
+        else if(type=="ip") {
+            console.assert(TODO);
+        }
+        else if(type=="ir") {
+            console.assert(TODO);
+        }
+        else if(type=="ik") {
+            console.assert(2<=tokens.length);
+            var kg = tokens[1];
+            if(kg=="clear") {
+                allowedKeys = {};
+            }
+            else if(kg=="alphabet") {
+                var keys = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+                for(var i=0; i<keys.length; ++i) {
+                    allowedKeys[keys[i]] = keys[i];
+                }
+            }
+            else if(kg=="number") {
+                var keys = "0123456789";
+                for(var i=0; i<keys.length; ++i) {
+                    allowedKeys[keys[i]] = keys[i];
+                }
+            }
+            else if(kg=="space") {
+                allowedKeys["Space"] = " ";
+            }
+            else if(kg=="graphic") {
+                var keys = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+                for(var i=0; i<keys.length; ++i) {
+                    allowedKeys[keys[i]] = keys[i];
+                }
+                allowedKeys["Space"] = " ";
+            }
+            else if(kg=="cursor") {
+                allowedKeys["ArrowRight"] = "right";
+                allowedKeys["ArrowLeft"] = "left";
+                allowedKeys["ArrowUp"] = "up";
+                allowedKeys["ArrowDown"] = "down";
+            }
+            else if(kg=="enter") {
+                allowedKeys["Enter"] = "enter";
+            }
+            else if(kg=="delete") {
+                allowedKeys["Delete"] = "delete";
+            }
+            else if(kg=="backspace") {
+                allowedKeys["Backspace"] = "backspace";
+            }
+            else if(kg=="escape") {
+                allowedKeys["Escape"] = "escape";
+            }
+            else if(kg=="all") {
+                var keys = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+                for(var i=0; i<keys.length; ++i) {
+                    allowedKeys[keys[i]] = keys[i];
+                }
+                allowedKeys["Space"] = " ";
+                allowedKeys["ArrowRight"] = "right";
+                allowedKeys["ArrowLeft"] = "left";
+                allowedKeys["ArrowUp"] = "up";
+                allowedKeys["ArrowDown"] = "down";
+                allowedKeys["Enter"] = "enter";
+                allowedKeys["Delete"] = "delete";
+                allowedKeys["Backspace"] = "backspace";
+                allowedKeys["Escape"] = "escape";
+            }
+            else {
+                console.assert(TODO);
+            }
+        }
+        else if(type=="a") {
+            console.assert(TODO);
+        }
+        else if(type=="n") {
+            newTime(2<=tokens.length ? tokens[1] : null);
+        }
+        else if(type=="f") {
+            console.assert(TODO);
+        }
+        else {
+            if(nowSnap===null) {
+                newTime(null);
+            }
+            buildSnapItem(line, tokens, type, nowSnap.length==0 ? null : nowSnap[nowSnap.length-1], screenTime==state.nowTime);
+            console.assert(nowSnap!=null);
+            nowSnap.push(line);
+            endTimestamp = Date.now();
+        }
+    };
+    var beforeData = "";
+    var updateAll = function() {
+        updateZoom();
+        updateOutputs();
+        updateControl();
+    }
+    window.addEventListener("keydown", function(e) {
+        if(allowedKeys[e.key]) {
+            if(!input_mode) {
+                return;
+            }
+            input_mode = false;
+            ws_send("k " + allowedKeys[e.key] + "\n");
+        }
+        else if(e.key=="ArrowLeft") {
+            var keys = Object.keys(snapMap);
+            var idx = Math.max(0, keys.indexOf(screenTime)) - 1;
+            if(idx<0) {
+                idx = 0;
+            }
+            var newScreenTime = keys[idx];
+            if(screenTime!=newScreenTime) {
+                changeSnap(newScreenTime);
+                updateAll();
+            }
+        }
+        else if(e.key=="ArrowRight") {
+            var keys = Object.keys(snapMap);
+            var idx = Math.max(0, keys.indexOf(screenTime)) + 1;
+            if(keys.length<=idx) {
+                idx = keys.length - 1;
+            }
+            var newScreenTime = keys[idx];
+            if(screenTime!=newScreenTime) {
+                changeSnap(newScreenTime);
+                updateAll();
+            }
+        }
+        else if(e.key=="ArrowUp") {
+            var keys = Object.keys(snapMap);
+            var idx = Math.max(0, keys.indexOf(screenTime)) - 10;
+            if(idx<0) {
+                idx = 0;
+            }
+            var newScreenTime = keys[idx];
+            if(screenTime!=newScreenTime) {
+                changeSnap(newScreenTime);
+                updateAll();
+            }
+        }
+        else if(e.key=="ArrowDown") {
+            var keys = Object.keys(snapMap);
+            var idx = Math.max(0, keys.indexOf(screenTime)) + 10;
+            if(keys.length<=idx) {
+                idx = keys.length - 1;
+            }
+            var newScreenTime = keys[idx];
+            if(screenTime!=newScreenTime) {
+                changeSnap(newScreenTime);
+                updateAll();
+            }
+        }
+    });
+    var omitPolylineSub = function(data, begin, end, eps) {
+        var max_i = -1;
+        var max_d = 0;
+        var bx = data[begin][0];
+        var by = data[begin][1];
+        var ex = data[end][0];
+        var ey = data[end][1];
+        for(var i=begin+1; i<end; ++i) {
+            var x = data[i][0];
+            var y = data[i][1];
+            var dx1 = x - bx;
+            var dy1 = y - by;
+            var dx2 = x - ex;
+            var dy2 = y - ey;
+            var d = Math.sqrt(dx1*dx1 + dy1*dy1) + Math.sqrt(dx2*dx2 + dy2*dy2);
+            if(max_d < d) {
+                max_d = d;
+                max_i = i;
+            }
+        }
+        var d2 = data[end][3] - data[begin][3];
+        var max_dd = max_d * max_d + eps * eps;
+        if(max_i!=-1 && max_dd <= d2*d2) {
+            data[max_i][4] = true;
+            omitPolylineSub(data, begin, max_i, eps);
+            omitPolylineSub(data, max_i, end, eps);
+        }
+    };
+    var omitPolyline = function(data) {
+        var data2 = [];
+        data2.length = data.length;
+        for(var i=0; i<data.length; ++i) {
+            data2[i] = [];
+            data2[i].length = 5;
+            data2[i][0] = data[i][0];
+            data2[i][1] = data[i][1];
+            data2[i][2] = parseFloat(i) / (data2.length-1);
+            if(i==0) {
+                data2[i][3] = 0;
+            }
+            else {
+                var dx = data[i][0] - data[i-1][0];
+                var dy = data[i][1] - data[i-1][1];
+                data2[i][3] = data2[i-1][3] + Math.sqrt(dx*dx+dy*dy);
+            }
+            data2[i][4] = false;
+        }
+        data2[0][4] = true;
+        data2[data.length-1][4] = true;
+        omitPolylineSub(data2, 0, data2.length-1, Math.min(zoom.maxX-zoom.minX, zoom.maxY-zoom.minY) * 0.0001 * 0.01);
+        var data3 = [];
+        for(var i=0; i<data2.length; ++i) {
+            if(data2[i][4]) {
+                data3.push(data[i]);
+            }
+        }
+        return data3;
+    }
+    var drawing_sessions = {};
+    var upTouch = function(id, x, y) {
+        return;
+        var session = drawing_sessions[id];
+        if(session!==undefined) {
+            delete drawing_sessions[id];
+            var ele = session.ele;
+            if(ele!=null) {
+                ele.remove();
+                ele = null;
+            }
+            var data = session.data;
+            if(2<=data.length) {
+                data = omitPolyline(data);
+                ele = createSvgElement("polyline");
+                ele.setAttribute("fill", "none");
+                ele.setAttribute("stroke", "red");
+                ele.setAttribute("stroke-linecap", "round");
+                ele.setAttribute("stroke-linejoin", "round");
+                ele.setAttribute("stroke-width", Math.min(zoom.maxX-zoom.minX, zoom.maxY-zoom.minY) * 0.005);
+                var points = [];
+                for(var i=0; i<data.length; ++i) {
+                    points.push(data[i][0] + "," + data[i][1]);
+                }
+                ele.setAttribute("points", points.join(" "));
+                drawed.appendChild(ele);
+            }
+        }
+    };
+    var downTouch = function(id, x, y) {
+        return;
+        if(drawing_sessions[id]!==undefined) {
+            upTouch(id, null, null);
+        }
+        drawing_sessions[id] = {data: [[x, y]], ele: null};
+    };
+    var moveTouch = function(id, x, y) {
+        return;
+        var session = drawing_sessions[id];
+        if(session!==undefined) {
+            var data = session.data;
+            console.assert(data!=null);
+            data.push([x, y]);
+            console.assert(2<=data.length);
+            var ele = session.ele;
+            if(ele==null) {
+                ele = session.ele = createSvgElement("polyline");
+                ele.setAttribute("fill", "none");
+                ele.setAttribute("stroke", "red");
+                ele.setAttribute("stroke-linecap", "round");
+                ele.setAttribute("stroke-linejoin", "round");
+                drawing.appendChild(ele);
+            }
+            ele.setAttribute("stroke-width", Math.min(zoom.maxX-zoom.minX, zoom.maxY-zoom.minY) * 0.005);
+            var points = [];
+            for(var i=0; i<data.length; ++i) {
+                points.push(data[i][0] + "," + data[i][1]);
+            }
+            ele.setAttribute("points", points.join(" "));
+        }
+    };
+    touch_screen.addEventListener("mousemove", function(e) {
+        var w = zoom.maxX-zoom.minX;
+        var h = zoom.maxY-zoom.minY;
+        var scaleToClient = Math.min(svg.clientWidth / w, svg.clientHeight / h);
+        var scaleToSvg = Math.max(w / svg.clientWidth, h / svg.clientHeight);
+        var clientLeft = (svg.clientWidth - w * scaleToClient) * 0.5;
+        var clientTop = (svg.clientHeight - h * scaleToClient) * 0.5;
+        var x = (e.clientX - clientLeft) * scaleToSvg + zoom.minX;
+        var y = (e.clientY - clientTop) * scaleToSvg + zoom.minY;
+        moveTouch("mouse", x, y);
+        if(!input_mode) {
+            return;
+        }
+        if(link_over_id!=null && link_over_id<links.length && links[link_over_id][0](x, y)) {
+        }
+        else {
+            if(link_over_ele!=null) {
+                foreground = renewElement(foreground);
+                link_over_id = null;
+                link_over_ele = null;
+            }
+            for(var i=links.length-1; 0<=i; --i) {
+                if(i!=link_over_id && links[i][0](x, y)) {
+                    link_over_id = i;
+                    link_over_ele = links[i][1]();
+                    foreground.appendChild(link_over_ele);
+                    if(links[i][2] & 1) {
+                        link_over_ele.setAttribute("stroke-opacity", "40%");
+                    }
+                    if(links[i][2] & 2) {
+                        link_over_ele.setAttribute("fill-opacity", "40%");
+                    }
+                    break;
+                }
+            }
+        }
+    });
+    touch_screen.addEventListener("touchmove", function(e) {
+        var w = zoom.maxX-zoom.minX;
+        var h = zoom.maxY-zoom.minY;
+        var scaleToClient = Math.min(svg.clientWidth / w, svg.clientHeight / h);
+        var scaleToSvg = Math.max(w / svg.clientWidth, h / svg.clientHeight);
+        var clientLeft = (svg.clientWidth - w * scaleToClient) * 0.5;
+        var clientTop = (svg.clientHeight - h * scaleToClient) * 0.5;
+        for(var i=0; i<e.changedTouches.length; ++i) {
+            var t = e.changedTouches[i];
+            var x = (t.clientX - clientLeft) * scaleToSvg + zoom.minX;
+            var y = (t.clientY - clientTop) * scaleToSvg + zoom.minY;
+            moveTouch(t.identifier, x, y);
+        }
+    });
+    touch_screen.addEventListener("mousedown", function(e) {
+        var w = zoom.maxX-zoom.minX;
+        var h = zoom.maxY-zoom.minY;
+        var scaleToClient = Math.min(svg.clientWidth / w, svg.clientHeight / h);
+        var scaleToSvg = Math.max(w / svg.clientWidth, h / svg.clientHeight);
+        var clientLeft = (svg.clientWidth - w * scaleToClient) * 0.5;
+        var clientTop = (svg.clientHeight - h * scaleToClient) * 0.5;
+        var x = (e.clientX - clientLeft) * scaleToSvg + zoom.minX;
+        var y = (e.clientY - clientTop) * scaleToSvg + zoom.minY;
+        downTouch("mouse", x, y);
+        if(!input_mode) {
+            return;
+        }
+        if(link_over_id!=null && link_over_ele!=null && link_over_id<links.length && links[link_over_id][0](x, y)) {
+            input_mode = false;
+            var ele = link_over_ele;
+            var flag = links[link_over_id][2];
+            ws_send("k " + links[link_over_id][3] + "\n");
+            if(flag & 1) {
+                ele.setAttribute("stroke-opacity", "80%");
+            }
+            if(flag & 2) {
+                ele.setAttribute("fill-opacity", "80%");
+            }
+            setTimeout(function() {
+                if(flag & 1) {
+                    ele.setAttribute("stroke-opacity", "0%");
+                }
+                if(flag & 2) {
+                    ele.setAttribute("fill-opacity", "0%");
+                }
+            }, 500);
+        }
+    });
+    touch_screen.addEventListener("touchstart", function(e) {
+        var w = zoom.maxX-zoom.minX;
+        var h = zoom.maxY-zoom.minY;
+        var scaleToClient = Math.min(svg.clientWidth / w, svg.clientHeight / h);
+        var scaleToSvg = Math.max(w / svg.clientWidth, h / svg.clientHeight);
+        var clientLeft = (svg.clientWidth - w * scaleToClient) * 0.5;
+        var clientTop = (svg.clientHeight - h * scaleToClient) * 0.5;
+        for(var i=0; i<e.changedTouches.length; ++i) {
+            var t = e.changedTouches[i];
+            var x = (t.clientX - clientLeft) * scaleToSvg + zoom.minX;
+            var y = (t.clientY - clientTop) * scaleToSvg + zoom.minY;
+            downTouch(t.identifier, x, y);
+        }
+    });
+    touch_screen.addEventListener("mouseup", function(e) {
+        var w = zoom.maxX-zoom.minX;
+        var h = zoom.maxY-zoom.minY;
+        var scaleToClient = Math.min(svg.clientWidth / w, svg.clientHeight / h);
+        var scaleToSvg = Math.max(w / svg.clientWidth, h / svg.clientHeight);
+        var clientLeft = (svg.clientWidth - w * scaleToClient) * 0.5;
+        var clientTop = (svg.clientHeight - h * scaleToClient) * 0.5;
+        var x = (e.clientX - clientLeft) * scaleToSvg + zoom.minX;
+        var y = (e.clientY - clientTop) * scaleToSvg + zoom.minY;
+        upTouch("mouse", x, y);
+        if(!input_mode) {
+            return;
+        }
+    });
+    touch_screen.addEventListener("touchend", function(e) {
+        var w = zoom.maxX-zoom.minX;
+        var h = zoom.maxY-zoom.minY;
+        var scaleToClient = Math.min(svg.clientWidth / w, svg.clientHeight / h);
+        var scaleToSvg = Math.max(w / svg.clientWidth, h / svg.clientHeight);
+        var clientLeft = (svg.clientWidth - w * scaleToClient) * 0.5;
+        var clientTop = (svg.clientHeight - h * scaleToClient) * 0.5;
+        for(var i=0; i<e.changedTouches.length; ++i) {
+            var t = e.changedTouches[i];
+            var x = (t.clientX - clientLeft) * scaleToSvg + zoom.minX;
+            var y = (t.clientY - clientTop) * scaleToSvg + zoom.minY;
+            upTouch(t.identifier, x, y);
+        }
+    });
+    var getGvFile = function() {
+        var lines = [];
+        var keys = Object.keys(snapMap);
+        for(var j=0; j<keys.length; ++j) {
+            var k = keys[j];
+            if(k.startsWith("#")) {
+                lines.push("n");
+            }
+            else {
+                lines.push("n " + k.substring(1));
+            }
+            var snap = snapMap[k];
+            for(var i=0; i<snap.length; ++i) {
+                lines.push(snap[i]);
+            }
+        }
+        lines.push("");
+        return lines.join("\n");
+    };
+    document.getElementsByClassName("copy")[0].addEventListener("click", function(e) {
+        var gv = getGvFile();
+        var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        var name = "";
+        for(var i=0; i<16; ++i) {
+            name += alphabet[Math.floor(Math.random() * alphabet.length)];
+        }
+        name = window.prompt("destination name:", name);
+        if(name!==null) {
+            var ws_url = [];
+            ws_url.push(window.location.protocol=="https:" ? "wss://" : "ws://");
+            ws_url.push(window.location.host);
+            ws_url.push("/" + name);
+            ws_url = ws_url.join("");
+            var ws = new WebSocket(ws_url);
+            ws.onopen = function(event) {
+                ws.send(gv);
+                window.open("http" + ws_url.substring(2));
+                ws.close();
+            };
+        }
+    });
+    document.getElementsByClassName("download")[0].addEventListener("click", function(e) {
+        var filename = window.prompt("download filename:");
+        if(filename!==null) {
+            var blob = new Blob([getGvFile()], {type: "text/plain"});
+            var url = URL.createObjectURL(blob);
+            var aEle = document.createElement("a");
+            aEle.download = filename + ".gv";
+            aEle.href = url;
+            aEle.click();
+            URL.revokeObjectURL(url);
+        }
+    });
+    document.getElementsByClassName("upload")[0].addEventListener("change", function(e) {
+        var file = e.currentTarget.files[0];
+        if(file) {
+            var f = new FileReader();
+            f.addEventListener("load", function(e2) {
+                e.target.value = "";
+                ws.send(e2.currentTarget.result);
+            });
+            f.readAsText(file);
+        }
+    });
+    window.scrollBy({left: 0, top: 10000, behavior: "smooth"});
+    return {
+        addLine: addLine,
+        initSnaps: initSnaps,
+        updateAll: updateAll,
+    };
+};
+        </script>
+        <script>
+var gv = null;
+var gvCallback = null;
+var gvInputLine = "";
+var run = function() {
+    var Module = {
+        'preRun': [ function() {
+            gvCallback = function(text) {
+                gvInputLine = text;
+                Module.ccall("resume_mm", null, null, null);
+                gv.updateAll();
+            };
+            var stdin_text = intArrayFromString(document.getElementsByClassName("stdin")[0].value, true);
+            var stdin_pos = 0;
+            var output_func = function(name) {
+                var ele = document.getElementsByClassName(name)[0];
+                var line = [];
+                var lines = [];
+                var cr = false;
+                var last = null;
+                var update = function() {
+                    var waited = Date.now() - last;
+                    if(waited<0 || 0.01<=waited) {
+                        lines.push(UTF8ArrayToString(line, 0));
+                        ele.value = lines.join("\n");
+                        lines.pop();
+                    }
+                    else {
+                        setTimeout(update, 10);
+                    }
+                };
+                return function(c) {
+                    if(last===null) {
+                        setTimeout(update, 10);
+                    }
+                    last = Date.now();
+                    if(c==10) {
+                        lines.push(UTF8ArrayToString(line, 0));
+                        cr = false;
+                        line = [];
+                    }
+                    else if(c==13) {
+                        cr = true;
+                    }
+                    else {
+                        if(cr) {
+                            line = [];
+                        }
+                        line.push(c);
+                    }
+                };
+            };
+            FS.init(function() {
+                return stdin_pos < stdin_text.length ? stdin_text[stdin_pos++] : 10;
+            }, output_func("stdout"), output_func("stderr"));
+            FS.writeFile('input.txt', document.getElementsByClassName("stdin")[0].value);
+            FS.writeFile('output.txt', document.getElementsByClassName("output_txt")[0].value);
+            gv.initSnaps();
+        }],
+        'postRun': [ function() {
+            gv.updateAll();
+        }],
+    };
+{{emscripten_js}}
+};
+window.addEventListener("load", function() {
+    var gvInputLine = "";
+    gv = gvInit(function(text) {
+        gvCallback(text);
+    });
+    var button = document.getElementsByClassName("button")[0];
+    var run_panel = document.getElementsByClassName("run_panel")[0];
+    var run_panel_hidden = false;
+    var run_panel_adjust = function() {
+        if(run_panel_hidden) {
+            run_panel.style.right = (-run_panel.clientWidth-4) + "px";
+        }
+        else {
+            run_panel.style.right = "-12px";
+        }
+    };
+    run_panel.addEventListener("click", function(e) {
+        if(e.offsetX<0) {
+            run_panel_hidden = !run_panel_hidden;
+            run_panel_adjust();
+        }
+    }, true);
+    button.addEventListener("click", function(e) {
+        run_panel_hidden = true;
+        run_panel_adjust();
+        run();
+    });
+    window.addEventListener("resize", function() {
+        run_panel_adjust();
+    });
+});
+        </script>
+    </head>
+    <body style="margin: 0;">
+        <div style="position: fixed;">
+            <div class="screen" style="position: fixed; top: 0; bottom: 0; left: 0; right: 0; padding-right: 36px; overflow: hidden;"></div>
+            <div class="touch_screen" style="z-index: 2; position: fixed; top: 0; bottom: 0; left: 0; right: 0; padding-right: 36px; overflow: hidden;"></div>
+        </div>
+        <div style="position: fixed; z-index: 3; overflow: hidden; right: 48px; bottom: 0;" align="right">
+            <div>Draw: <span class="draw_time"></span>ms</div>
+            <div class="pages" style="display: none;"><span class="snap_name"></span> <span class="now_snap"></span> / <span class="total_snap"></span></div>
+            <div style="display: none;">[<span class="copy">Copy</span>] [<span class="download">Download</span>] [Upload: <input type="file" accept=".gv" class="upload">]</div>
+        </div>
+        <pre class="console" style="margin: 0; position: absolute; font-size: large; width: 100%; white-space: pre;"></pre>
+        <div class="run_panel" style="position: fixed; right: -12px; top: 0; bottom: 0; z-index: 4; width: 30%; margin: 4px; padding: 10px; border: solid 3px; border-left: solid 32px; border-radius: 10px; background-color: #FFFFFF;">
+            <div style="position: absolute; overflow-y: scroll; overflow-x: hidden; left: 0; right: 0; top: 0; bottom: 0; height: auto; margin: 8px; padding: 0px; padding-right: 16px;">
+                <input class="button" type="button" value="Run!" style="width: 100%;"><br>
+                <br>
+                stdin(input.txt):<br>
+                <textarea class="stdin" rows="10" style="width: 100%;">{{input_txt}}</textarea><br>
+                <br>
+                (output.txt):<br>
+                <textarea class="output_txt" rows="10" style="width: 100%;">{{output_txt}}</textarea><br>
+                <br>
+                stdout:<br>
+                <textarea class="stdout" rows="10" style="width: 100%;"></textarea><br>
+                <br>
+                stderr:<br>
+                <textarea class="stderr" rows="10" style="width: 100%;"></textarea><br>
+            </div>
+        </div>
+    </body>
+</html>

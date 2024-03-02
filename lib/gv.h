@@ -40,6 +40,85 @@ gvRGB gvHSB(double h, double s, double b) {
     return gvRGB((int)(b * 255 + 0.5), (int)(p * 255 + 0.5), (int)(q * 255 + 0.5));
 }
 #ifdef MM$VIS
+char gv$buf[65536];
+std::vector<std::string> gv$input_words;
+int gv$input_cursor;
+bool gvInputIsMessage() {
+    assert(1<=gv$input_words.size());
+    return gv$input_words[0].size()==1 && gv$input_words[0][0]=='k';
+}
+#if __emscripten__
+EM_JS(void, gvSendJs, (const char * line, int len), {
+    var v = UTF8ToString(line, len);
+    gv.addLine(v);
+});
+EM_JS(void, gvRecv, (char * buf, int len), {
+    stringToUTF8(gvInputLine, buf, len);
+});
+#define gvInit(...)
+#define gvPipe(...)
+bool gv$flushFlag = true;
+void gvFlush() {
+    gv$flushFlag = false;
+    //TODO
+}
+void gvFlush2_() {
+    //TODO
+}
+void gvFlush_() {
+    if(gv$flushFlag) {
+        //TODO
+    }
+}
+char gv$sendfBuf[65536];
+void gvSend(const char * line) {
+    gvSendJs(line, strlen(line));
+}
+void gvSendf(const char * format, ...) {
+    va_list arg;
+    va_start(arg, format);
+    int len = vsprintf(gv$sendfBuf, format, arg);
+    va_end(arg);
+    gvSendJs(gv$sendfBuf, len);
+}
+void gvInput() {
+    gvInit();
+    gvSend("i");
+    gvFlush2_();
+    mm$suspend_mm_fiber();
+    gv$input_words.clear();
+    gv$input_words.emplace_back();
+    std::string * word = &gv$input_words.back();
+    while(true) {
+        gvRecv(gv$buf, sizeof(gv$buf));
+        const char * p = gv$buf;
+        if(!p) {
+            break;
+        }
+        char c = 0;
+        for(const char * p2 = p; ; ++p2) {
+            c = *p2;
+            if(!c || c=='\n') {
+                break;
+            }
+            else if(c==' ') {
+                gv$input_words.emplace_back();
+                word = &gv$input_words.back();
+            }
+            else {
+                word->push_back(c);
+            }
+        }
+        if(c=='\n') {
+            break;
+        }
+    }
+    if(word->empty() && 2<=gv$input_words.size()) {
+        gv$input_words.pop_back();
+    }
+    gv$input_cursor = gvInputIsMessage() ? 1 : 0;
+}
+#else
 void popen2(const char * cmd, FILE * & w, FILE * & r) {
     int stdin_pipe[2];
     int stdout_pipe[2];
@@ -98,7 +177,7 @@ void gvInit() {
         gv$file = fopen("result.gv", "w+");
     }
 }
-void gvPipe(const string & cmd) {
+void gvPipe(const std::string & cmd) {
     if(gv$file==NULL) {
         popen2(cmd.c_str(), gv$file, gv$file_read);
         fprintf(stderr, "popen %s ... %p %p\n", cmd.c_str(), gv$file, gv$file_read);
@@ -107,6 +186,7 @@ void gvPipe(const string & cmd) {
 void gvFlush() {
     gv$flushFlag = false;
     if(gv$file) {
+
         fwrite("f\n", 2, 1, gv$file);
         fflush(gv$file);
     }
@@ -124,26 +204,72 @@ void gvFlush_() {
         fflush(gv$file);
     }
 }
+void gvSend(const char * line) {
+    fprintf(gv$file, "%s\n", line);
+}
+void gvSendf(const char * format, ...) {
+    va_list arg;
+    va_start(arg, format);
+    vfprintf(gv$file, format, arg);
+    va_end(arg);
+    fputc('\n', gv$file);
+}
+void gvInput() {
+    gvInit();
+    gvSend("i");
+    gvFlush2_();
+    gv$input_words.clear();
+    gv$input_words.emplace_back();
+    std::string * word = &gv$input_words.back();
+    while(true) {
+        char * p = fgets(gv$buf, sizeof(gv$buf), gv$file_read);
+        if(!p) {
+            break;
+        }
+        char c = 0;
+        for(char * p2 = p; ; ++p2) {
+            c = *p2;
+            if(!c || c=='\n') {
+                break;
+            }
+            else if(c==' ') {
+                gv$input_words.emplace_back();
+                word = &gv$input_words.back();
+            }
+            else {
+                word->push_back(c);
+            }
+        }
+        if(c=='\n') {
+            break;
+        }
+    }
+    if(word->empty() && 2<=gv$input_words.size()) {
+        gv$input_words.pop_back();
+    }
+    gv$input_cursor = gvInputIsMessage() ? 1 : 0;
+}
+#endif
 inline bool gvTime() {
     gvInit();
-    fwrite("n\n", 2, 1, gv$file);
+    gvSend("n");
     gvFlush_();
     return true;
 }
 inline bool gvTime(double t) {
     gvInit();
-    fprintf(gv$file, "n %g\n", t);
+    gvSendf("n %g", t);
     gvFlush_();
     return true;
 }
 void gvRollback() {
     gvInit();
-    fwrite("r\n", 2, 1, gv$file);
+    gvSend("r");
     gvFlush_();
 }
 void gvRollbackAll() {
     gvInit();
-    fwrite("ra\n", 3, 1, gv$file);
+    gvSend("ra");
     gvFlush_();
 }
 double gv$fps = -1000000000.0;
@@ -172,12 +298,12 @@ inline bool gvFpsWithRollback() {
 }
 void gvCircle(double x, double y) {
     gvInit();
-    fprintf(gv$file, "c %g %g\n", x, y);
+    gvSendf("c %g %g", x, y);
     gvFlush_();
 }
 void gvCircle(double x, double y, double r, gvRGB rgb) {
     gvInit();
-    fprintf(gv$file, "c %g %g %u %g\n", x, y, rgb.toInt(), r);
+    gvSendf("c %g %g %u %g", x, y, rgb.toInt(), r);
     gvFlush_();
 }
 void gvCircle(double x, double y, double r) {
@@ -185,7 +311,7 @@ void gvCircle(double x, double y, double r) {
 }
 void gvCircle(double x, double y, gvRGB rgb) {
     gvInit();
-    fprintf(gv$file, "c %g %g %u\n", x, y, rgb.toInt());
+    gvSendf("c %g %g %u\n", x, y, rgb.toInt());
     gvFlush_();
 }
 void gvRect(double x, double y, double x2, double y2, double r, gvRGB rgb) {
@@ -194,12 +320,7 @@ void gvRect(double x, double y, double x2, double y2, double r, gvRGB rgb) {
     double ex = max(x, x2) + fabs(r);
     double ey = max(y, y2) + fabs(r);
     gvInit();
-    fprintf(gv$file, "p %u", rgb.toInt());
-    fprintf(gv$file, " %g %g", bx, by);
-    fprintf(gv$file, " %g %g", ex, by);
-    fprintf(gv$file, " %g %g", ex, ey);
-    fprintf(gv$file, " %g %g", bx, ey);
-    fprintf(gv$file, "\n");
+    gvSendf("p %u %g %g %g %g %g %g %g %g", rgb.toInt(), bx, by, ex, by, ex, ey, bx, ey);
     gvFlush_();
 }
 void gvRect(double x, double y, double x2, double y2, gvRGB rgb) {
@@ -224,128 +345,116 @@ void gvRect(double x, double y) {
     gvRect(x, y, x, y, 0.5, gvRGB(0, 0, 0));
 }
 void gvText(double x, double y, double r, gvRGB rgb, const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "t %g %g %u %g ", x, y, rgb.toInt(), r);
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("t %g %g %u %g %s", x, y, rgb.toInt(), r, gv$buf);
     gvFlush_();
 }
 void gvText(double x, double y, double r, const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "t %g %g 0 %g ", x, y, r);
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("t %g %g 0 %g %s", x, y, r, gv$buf);
     gvFlush_();
 }
 void gvText(double x, double y, gvRGB rgb, const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "t %g %g %u 0.5 ", x, y, rgb.toInt());
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("t %g %g %u 0.5 %s", x, y, rgb.toInt(), gv$buf);
     gvFlush_();
 }
 void gvText(double x, double y, const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "t %g %g 0 0.5 ", x, y);
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("t %g %g 0 0.5 %s", x, y, gv$buf);
     gvFlush_();
 }
 void gvTextLeft(double x, double y, double r, gvRGB rgb, const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "tl %g %g %u %g ", x, y, rgb.toInt(), r);
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("tl %g %g %u %g %s", x, y, rgb.toInt(), r, gv$buf);
     gvFlush_();
 }
 void gvTextLeft(double x, double y, double r, const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "tl %g %g 0 %g ", x, y, r);
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("tl %g %g 0 %g %s", x, y, r, gv$buf);
     gvFlush_();
 }
 void gvTextLeft(double x, double y, gvRGB rgb, const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "tl %g %g %u 0.5 ", x, y, rgb.toInt());
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("tl %g %g %u 0.5 %s", x, y, rgb.toInt(), gv$buf);
     gvFlush_();
 }
 void gvTextLeft(double x, double y, const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "tl %g %g 0 0.5 ", x, y);
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("tl %g %g 0 0.5 %s", x, y, gv$buf);
     gvFlush_();
 }
 void gvTextRight(double x, double y, double r, gvRGB rgb, const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "tr %g %g %u %g ", x, y, rgb.toInt(), r);
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("tr %g %g %u %g %s", x, y, rgb.toInt(), r, gv$buf);
     gvFlush_();
 }
 void gvTextRight(double x, double y, double r, const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "tr %g %g 0 %g ", x, y, r);
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("tr %g %g 0 %g %s", x, y, r, gv$buf);
     gvFlush_();
 }
 void gvTextRight(double x, double y, gvRGB rgb, const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "tr %g %g %u 0.5 ", x, y, rgb.toInt());
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("tr %g %g %u 0.5 %s", x, y, rgb.toInt(), gv$buf);
     gvFlush_();
 }
 void gvTextRight(double x, double y, const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "tr %g %g 0 0.5 ", x, y);
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("tr %g %g 0 0.5 %s", x, y, gv$buf);
     gvFlush_();
 }
 void gvLine(double x1, double y1, double x2, double y2, double r, gvRGB rgb) {
     gvInit();
-    fprintf(gv$file, "l %g %g %g %g %u %g\n", x1, y1, x2, y2, rgb.toInt(), r * 0.1);
+    gvSendf("l %g %g %g %g %u %g\n", x1, y1, x2, y2, rgb.toInt(), r * 0.1);
     gvFlush_();
 }
 void gvLine(double x1, double y1, double x2, double y2, double r) {
@@ -359,7 +468,7 @@ void gvLine(double x1, double y1, double x2, double y2) {
 }
 void gvArrow(double x1, double y1, double x2, double y2, double r, gvRGB rgb) {
     gvInit();
-    fprintf(gv$file, "la %g %g %g %g %u %g\n", x1, y1, x2, y2, rgb.toInt(), r * 0.1);
+    gvSendf("la %g %g %g %g %u %g\n", x1, y1, x2, y2, rgb.toInt(), r * 0.1);
     gvFlush_();
 }
 void gvArrow(double x1, double y1, double x2, double y2, double r) {
@@ -372,58 +481,24 @@ void gvArrow(double x1, double y1, double x2, double y2) {
     gvArrow(x1, y1, x2, y2, 0.5);
 }
 void gvLink(const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "il ");
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("il %s", gv$buf);
     gvFlush_();
 }
-std::vector<string> gv$input_words;
-int gv$input_cursor;
-bool gvInputIsMessage() {
-    assert(1<=gv$input_words.size());
-    return gv$input_words[0].size()==1 && gv$input_words[0][0]=='k';
-}
-void gvInput() {
+void gvKeyboard(const char * format = "?", ...) {
+    va_list arg;
+    va_start(arg, format);
+    vsprintf(gv$buf, format, arg);
+    va_end(arg);
     gvInit();
-    fprintf(gv$file, "i\n");
-    gvFlush2_();
-    char buf[4096];
-    gv$input_words.clear();
-    gv$input_words.emplace_back();
-    std::string * word = &gv$input_words.back();
-    while(true) {
-        char * p = fgets(buf, sizeof(buf), gv$file_read);
-        if(!p) {
-            break;
-        }
-        char c = 0;
-        for(char * p2 = p; ; ++p2) {
-            c = *p2;
-            if(!c || c=='\n') {
-                break;
-            }
-            else if(c==' ') {
-                gv$input_words.emplace_back();
-                word = &gv$input_words.back();
-            }
-            else {
-                word->push_back(c);
-            }
-        }
-        if(c=='\n') {
-            break;
-        }
-    }
-    if(word->empty() && 2<=gv$input_words.size()) {
-        gv$input_words.pop_back();
-    }
-    gv$input_cursor = gvInputIsMessage() ? 1 : 0;
+    gvSendf("ik %s", gv$buf);
+    gvFlush_();
 }
-const string & gvInputWord() {
+const std::string & gvInputWord() {
     assert(gv$input_cursor<gv$input_words.size());
     return gv$input_words[gv$input_cursor++];
 }
@@ -434,13 +509,12 @@ double gvInputFloat() {
     return atof(gvInputWord().c_str());
 }
 void gvOutput(const char * format = "?", ...) {
-    gvInit();
-    fprintf(gv$file, "o ");
     va_list arg;
     va_start(arg, format);
-    vfprintf(gv$file, format, arg);
+    vsprintf(gv$buf, format, arg);
     va_end(arg);
-    fprintf(gv$file, "\n");
+    gvInit();
+    gvSendf("o %s", gv$buf);
     gvFlush_();
 }
 #else
@@ -457,4 +531,10 @@ void gvOutput(const char * format = "?", ...) {
 #define gvRollback(...)
 #define gvRollbackAll(...)
 #define gvOutput(...)
+#define gvLink(...)
+#define gvInput(...)
+#define gvKeyboard(...)
+#define gvInputWord(...) ""
+#define gvInputInt(...) 0
+#define gvInputFloat(...) 0.0
 #endif

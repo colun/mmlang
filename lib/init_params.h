@@ -1,7 +1,11 @@
 std::map<std::string, std::string> mm$param$args;
+std::vector<std::string> mm$param$argsList;
 void mm$initParams(int argc, const char * * argv) {
     for(int i=2; i<argc; i+=2) {
         mm$param$args[argv[i-1]] = argv[i];
+    }
+    for(int i=0; i<argc; ++i) {
+        mm$param$argsList.emplace_back(argv[i]);
     }
 }
 void initParams(const string & pythonDictString) {

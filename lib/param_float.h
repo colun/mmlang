@@ -5,3 +5,9 @@ double paramFloat(const string & name, double default_value) {
     }
     return default_value;
 }
+double paramFloat(int i, double default_value) {
+    if(i<mm$param$argsList.size()) {
+        return atof(mm$param$argsList[i].c_str());
+    }
+    return default_value;
+}
