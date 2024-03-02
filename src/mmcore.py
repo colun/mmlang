@@ -300,6 +300,7 @@ def toStrBoundArg(containerTy, args, upper_flag):
 
 use_profiler = False
 use_sa_profiler = False
+use_emscripten = False
 use_pybind11 = False
 
 
@@ -773,6 +774,7 @@ def compress(src):
         str_mode = False
         line_char_count = 0
         tokens = []
+        prefix = ''
         for token in line.split('"'):
             if str_mode:
                 tokens.append(token)
@@ -781,9 +783,9 @@ def compress(src):
                 while count < len(token) and token[-1 - count] == "\\":
                     count += 1
                 str_mode = count % 2 == 1
+                prefix = ' '
             else:
                 words = []
-                prefix = ''
                 pre_word_is_quote = False
                 for word in token.split(' '):
                     if word:
@@ -800,7 +802,7 @@ def compress(src):
                         line_char_count += len(word)
                         prefix = '' if word[-1] in nospace_chara else ' '
                         pre_word_is_quote = word[-1] == "'"
-                tokens.append(''.join(words))
+                tokens.append(''.join(words).replace("char*", "char* "))
                 str_mode = True
                 line_char_count += 1
         assert str_mode
@@ -885,14 +887,16 @@ class group_node(base_node):
                 context.print('%s %s;' % (typeToStr(ty), name))
         context = preContext
 
-    def start(self, source_name, profiler_flag, sa_profiler_flag, pybind11_flag):
+    def start(self, source_name, profiler_flag, sa_profiler_flag, emscripten_flag, pybind11_flag):
         global context
         global use_profiler
         global use_sa_profiler
+        global use_emscripten
         global use_pybind11
         context = Context(scopeLevel=0)
         use_profiler = profiler_flag
         use_sa_profiler = sa_profiler_flag
+        use_emscripten = emscripten_flag
         use_pybind11 = pybind11_flag
         if use_profiler:
             context.appendInclude('profiler.h')
@@ -916,20 +920,37 @@ class group_node(base_node):
             context.appendInclude('pybind11/pybind11.h')
             context.appendInclude('pybind11/stl.h')
             context.print('PYBIND11_MODULE(%s, mm$pybind11) {' % (source_name, ))
+        elif use_emscripten:
+            context.print('void mm$main(void *) {')
         else:
             context.print('int main(int mm$argc, const char * * mm$argv) {')
         context.indent()
         if use_pybind11:
             for func_name in context.pybind11_funcs:
                 context.print('mm$pybind11.def("%s", &%s);' % (func_name, func_name))
+        elif use_emscripten:
+            pass
         else:
             context.appendInclude('init_params.h')
             context.print('mm$initParams(mm$argc, mm$argv);')
         self.suite()
-        if not use_pybind11:
+        if use_pybind11:
+            pass
+        elif use_emscripten:
+            context.print('mm$end_mm_fiber();')
+        else:
             context.print('return 0;')
         context.dedent()
         context.print('}')
+        if use_emscripten:
+            context.appendInclude('mm_emscripten.h')
+            context.appendInclude('init_params.h')
+            context.print('int main(int mm$argc, const char * * mm$argv) {')
+            context.indent()
+            context.print('mm$initParams(mm$argc, mm$argv);')
+            context.print('mm$start_mm_fiber(mm$main);')
+            context.dedent()
+            context.print('}')
         for name in context.getUsedDefines():
             print('#define %s' % (name, ))
         for inc in context.getUsedIncludes():
@@ -1035,8 +1056,10 @@ class group_node(base_node):
                         if child.args[i * 2 + 1] != '=':
                             flag = False
                     child.args[i * 2].countMutate()
-            elif (isinstance(child, pre_op1_node) or isinstance(child, post_op1_node)) and child.node_type in ['pre_inc', 'pre_dec', 'post_inc', 'post_dec']:
-                child.child_node.countMutate()
+            #elif (isinstance(child, pre_op1_node) or isinstance(child, post_op1_node)) and child.node_type in ['pre_inc', 'pre_dec', 'post_inc', 'post_dec']:
+            #    child.child_node.countMutate()
+            child.visit('visitCountMutate')
+
         context = parentContext
 
     def printContinueLabel(self, label):
@@ -1072,7 +1095,9 @@ class group_node(base_node):
                     ty = arg.getType()
                     init_value = '0'
                     func_name = str(expr.func)
-                    if func_name == 'min':
+                    if func_name == 'prod':
+                        init_value = '1'
+                    elif func_name == 'min':
                         init_value = getMinMaxValueExpr(ty, True)
                     elif func_name == 'max':
                         init_value = getMinMaxValueExpr(ty, False)
@@ -1088,11 +1113,15 @@ class group_node(base_node):
                         context.print('bool %s = false;' % (name, ))
                     elif func_name == 'all':
                         context.print('bool %s = true;' % (name, ))
-                    elif func_name in ['sum', 'xor', 'mean']:
-                        context.print('%s %s = %s;' % ('int' if ty == 'bool' else ty, name, init_value))
+                    elif func_name == 'mean' and ty=='bool':
+                        context.print('int %s$c = %s;' % (name, init_value))
+                    elif func_name == 'geomean' and ty!='bool':
+                        context.print('double %s = %s;' % (name, init_value))
+                    elif func_name == 'sum' and ty=='bool':
+                        context.print('int %s = %s;' % (name, init_value))
                     else:
                         context.print('%s %s = %s;' % (ty, name, init_value))
-                    if func_name == 'mean':
+                    if func_name == 'mean' or func_name == 'geomean':
                         context.print('int %s$cnt = 0;' % (name, ))
                     visitTopologicalUseBind(arg)
                     context.pushInstantSymbols()
@@ -1113,17 +1142,37 @@ class group_node(base_node):
                         context.print('if(!(%s)) { %s = false; break; }' % (arg, name))
                     elif func_name == 'sum':
                         context.print('%s += %s;' % (name, arg))
+                    elif func_name == 'prod':
+                        if ty=='bool':
+                            context.print('%s &= %s;' % (name, arg))
+                        else:
+                            context.print('%s *= %s;' % (name, arg))
                     elif func_name == 'xor':
                         context.print('%s ^= %s;' % (name, arg))
                     elif func_name == 'mean':
-                        context.print('{ %s += %s; ++%s$cnt; }' % (name, arg, name))
+                        if ty=='bool':
+                            context.print('{ %s$c += %s; ++%s$cnt; }' % (name, arg, name))
+                        else:
+                            context.print('{ %s += %s; ++%s$cnt; }' % (name, arg, name))
+                    elif func_name == 'geomean':
+                        if ty=='bool':
+                            context.print('{ %s &= %s; ++%s$cnt; }' % (name, arg, name))
+                        else:
+                            context.print('{ %s += log2(%s); ++%s$cnt; }' % (name, arg, name))
                     elif func_name in ['median', 'count_uniques']:
                         context.print('%s$c.push_back(%s);' % (name, arg))
                     self.closeNest(nest_count2)
                     context.popInstantSymbols()
                     if func_name == 'mean':
                         context.print('assert(%s$cnt);' % (name, ))
-                        context.print('%s /= %s$cnt;' % (name, name))
+                        if ty=='bool':
+                            context.print('double %s = (double)%s$c / %s$cnt;' % (name, name, name))
+                        else:
+                            context.print('%s /= %s$cnt;' % (name, name))
+                    if func_name == 'geomean':
+                        context.print('assert(%s$cnt);' % (name, ))
+                        if ty!='bool':
+                            context.print('%s = exp2(%s / %s$cnt);' % (name, name, name))
                     elif func_name == 'median':
                         context.print('assert(!%s$c.empty());' % (name, ))
                         context.appendInclude('algorithm')
@@ -2325,18 +2374,20 @@ class call_node(base_node):
                 assert len(self.args) == 1
                 return 'get<%s>(%s)' % (self.args[0], self.func)
             return '%s[%s]' % (self.func, ', '.join(str(arg) for arg in self.args))
-        if self.node_type == 'funccall' and len(self.args) == 0 and isinstance(self.func, node_getattr) and self.func.member in ['sort', 'rsort', 'reverse', 'shuffle', 'pop', 'shift']:
+        if self.node_type == 'funccall' and len(self.args) == 0 and isinstance(self.func, node_getattr) and self.func.member in ['sort', 'rsort', 'unique', 'reverse', 'shuffle', 'pop', 'shift']:
             ty = self.func.obj.getType()
             if ty == 'string' or isinstance(ty, Template) and ty.name in ['vector', 'deque']:
                 if self.func.member == 'sort':
                     return 'sort(%s.begin(), %s.end())' % (self.func.obj, self.func.obj)
                 if self.func.member == 'rsort':
                     return 'sort(%s.rbegin(), %s.rend())' % (self.func.obj, self.func.obj)
+                if self.func.member == 'unique':
+                    return '%s.erase(unique(%s.begin(), %s.end()), %s.end())' % (self.func.obj, self.func.obj, self.func.obj, self.func.obj)
                 if self.func.member == 'reverse':
                     return 'reverse(%s.begin(), %s.end())' % (self.func.obj, self.func.obj)
                 if self.func.member == 'shuffle':
                     context.visitInclude('lrand49')
-                    return 'for(int $1=0, $e=%s.size(); $1<$e; ++$1) swap(%s[$1], %s[lrand49($e-$1)+$1])' % (self.func.obj, self.func.obj, self.func.obj)
+                    return 'for(int $i=0, $e=%s.size(); $i<$e; ++$i) swap(%s[$i], %s[lrand49($e-$i)+$i])' % (self.func.obj, self.func.obj, self.func.obj)
                 if self.func.member == 'pop':
                     return '({ auto ret = %s.back(); %s.pop_back(); ret; })' % (self.func.obj, self.func.obj, )
                 if self.func.member == 'shift' and ty.name == 'deque':
@@ -2413,12 +2464,18 @@ class call_node(base_node):
 
     def getType(self):
         if self.node_type == 'funccall':
-            if isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'xor', 'mean', 'median', 'move'] and len(self.args) == 1:
-                return self.args[0].getType()
+            if isinstance(self.func, node_var) and self.func.name in ['mean'] and len(self.args) == 1 and self.args[0].getType()=='bool':
+                return 'double'
+            if isinstance(self.func, node_var) and self.func.name in ['geomean'] and len(self.args) == 1 and self.args[0].getType()!='bool':
+                return 'double'
+            if isinstance(self.func, node_var) and self.func.name in ['sum'] and len(self.args) == 1 and self.args[0].getType()=='bool':
+                return 'int'
             if isinstance(self.func, node_var) and self.func.name in ['count_trues', 'count_uniques', 'count_changes'] and len(self.args) == 1:
                 return 'int'
             if isinstance(self.func, node_var) and self.func.name in ['any', 'all'] and len(self.args) == 1:
                 return 'bool'
+            if isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'prod', 'xor', 'mean', 'geomean', 'median', 'move'] and len(self.args) == 1:
+                return self.args[0].getType()
             if isinstance(self.func, node_getattr):
                 if self.func.member in ['where', 'eq_to_end', 'eq_to_rend']:
                     return self.func.obj.getType()
@@ -2482,7 +2539,7 @@ class call_node(base_node):
         return [self.func] + list(self.args)
 
     def getChildNodesForBind(self):
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'median'] and len(self.args) == 1:
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'prod', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'geomean', 'median'] and len(self.args) == 1:
             return [self.func]
         else:
             return [self.func] + list(self.args)
@@ -2495,7 +2552,7 @@ class call_node(base_node):
                 self.func.obj.reserveBind()
             elif self.func.member in ['eq_to_end', 'eq_to_rend']:
                 self.func.obj.reserveBind()
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'median'] and len(self.args) == 1:
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'prod', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'geomean', 'median'] and len(self.args) == 1:
             self.reserveBind()
             if self.func.name in ['min', 'max']:
                 self.args[0].reserveBind()
@@ -2509,7 +2566,7 @@ class call_node(base_node):
             return self.func.printResize(size, name)
 
     def isAggregateFunc(self):
-        return self.node_type == 'funccall' and str(self.func) in ['min', 'max', 'sum', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'median'] and len(self.args) == 1
+        return self.node_type == 'funccall' and str(self.func) in ['min', 'max', 'sum', 'prod', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'geomean', 'median'] and len(self.args) == 1
 
 
 call_dic = {
@@ -2546,7 +2603,7 @@ class node_getattr(base_node):
             return 'int'
         if self.member in ['substr']:
             return 'string'
-        if isinstance(ty, Template):
+        if isinstance(ty, Template) or isinstance(ty, str):
             return context.getMethodReturnType(ty, self.member)
         return 'int'
 
@@ -2870,6 +2927,10 @@ class pre_op1_node(base_node):
         assert self.op == '-'
         self.child_node.countMutate()
 
+    def visitCountMutate(self):
+        if isinstance(self.child_node, node_var):
+            context.countMutate(self.child_node.name)
+
 
 pre_op1_dic = {
     'logical_not': '!',
@@ -2900,6 +2961,10 @@ class post_op1_node(base_node):
 
     def getChildNodes(self):
         return [self.child_node]
+
+    def visitCountMutate(self):
+        if isinstance(self.child_node, node_var):
+            context.countMutate(self.child_node.name)
 
 
 post_op1_dic = {

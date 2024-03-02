@@ -54,6 +54,103 @@ void print_unit(const char * val) {
 void print_unit(const std::string & val) {
     printf("%s", val.c_str());
 }
+template<class T>void print_unit(const std::vector<T> & val);
+template<class T1>void print_unit(const std::tuple<T1> & val) {
+    printf("tuple(1) { ");
+    print_unit(get<0>(val));
+    printf(" }");
+}
+template<class T1, class T2>void print_unit(const std::tuple<T1, T2> & val) {
+    printf("tuple(2) { ");
+    print_unit(get<0>(val));
+    fputc(' ', stdout);
+    print_unit(get<1>(val));
+    printf(" }");
+}
+template<class T1, class T2, class T3>void print_unit(const std::tuple<T1, T2, T3> & val) {
+    printf("tuple(3) { ");
+    print_unit(get<0>(val));
+    fputc(' ', stdout);
+    print_unit(get<1>(val));
+    fputc(' ', stdout);
+    print_unit(get<2>(val));
+    printf(" }");
+}
+template<class T1, class T2, class T3, class T4>void print_unit(const std::tuple<T1, T2, T3, T4> & val) {
+    printf("tuple(4) { ");
+    print_unit(get<0>(val));
+    fputc(' ', stdout);
+    print_unit(get<1>(val));
+    fputc(' ', stdout);
+    print_unit(get<2>(val));
+    fputc(' ', stdout);
+    print_unit(get<3>(val));
+    printf(" }");
+}
+template<class T1, class T2, class T3, class T4, class T5>void print_unit(const std::tuple<T1, T2, T3, T4, T5> & val) {
+    printf("tuple(5) { ");
+    print_unit(get<0>(val));
+    fputc(' ', stdout);
+    print_unit(get<1>(val));
+    fputc(' ', stdout);
+    print_unit(get<2>(val));
+    fputc(' ', stdout);
+    print_unit(get<3>(val));
+    fputc(' ', stdout);
+    print_unit(get<4>(val));
+    printf(" }");
+}
+template<class T1, class T2, class T3, class T4, class T5, class T6>void print_unit(const std::tuple<T1, T2, T3, T4, T5, T6> & val) {
+    printf("tuple(6) { ");
+    print_unit(get<0>(val));
+    fputc(' ', stdout);
+    print_unit(get<1>(val));
+    fputc(' ', stdout);
+    print_unit(get<2>(val));
+    fputc(' ', stdout);
+    print_unit(get<3>(val));
+    fputc(' ', stdout);
+    print_unit(get<4>(val));
+    fputc(' ', stdout);
+    print_unit(get<5>(val));
+    printf(" }");
+}
+template<class T1, class T2, class T3, class T4, class T5, class T6, class T7>void print_unit(const std::tuple<T1, T2, T3, T4, T5, T6, T7> & val) {
+    printf("tuple(7) { ");
+    print_unit(get<0>(val));
+    fputc(' ', stdout);
+    print_unit(get<1>(val));
+    fputc(' ', stdout);
+    print_unit(get<2>(val));
+    fputc(' ', stdout);
+    print_unit(get<3>(val));
+    fputc(' ', stdout);
+    print_unit(get<4>(val));
+    fputc(' ', stdout);
+    print_unit(get<5>(val));
+    fputc(' ', stdout);
+    print_unit(get<6>(val));
+    printf(" }");
+}
+template<class T1, class T2, class T3, class T4, class T5, class T6, class T7, class T8>void print_unit(const std::tuple<T1, T2, T3, T4, T5, T6, T7, T8> & val) {
+    printf("tuple(8) { ");
+    print_unit(get<0>(val));
+    fputc(' ', stdout);
+    print_unit(get<1>(val));
+    fputc(' ', stdout);
+    print_unit(get<2>(val));
+    fputc(' ', stdout);
+    print_unit(get<3>(val));
+    fputc(' ', stdout);
+    print_unit(get<4>(val));
+    fputc(' ', stdout);
+    print_unit(get<5>(val));
+    fputc(' ', stdout);
+    print_unit(get<6>(val));
+    fputc(' ', stdout);
+    print_unit(get<7>(val));
+    printf(" }");
+}
 template<class T>void print_unit(const std::vector<T> & val) {
     printf("vec(%d) {", (int)val.size());
     for(int i=0; i<(int)val.size(); ++i) {

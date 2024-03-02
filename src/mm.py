@@ -10,6 +10,7 @@ import lark.indenter
 import json
 from . import mmcore
 import concurrent.futures
+import threading
 from . import threadpool
 import re
 import colorama
@@ -19,7 +20,8 @@ import time
 import random
 from . import mmhttpd
 
-__version__ = open(os.path.join(os.path.dirname(__file__), '..', 'version.txt')).read()
+version_path = os.path.join(os.path.dirname(__file__), '..', 'version.txt')
+__version__ = open(version_path).read() if os.path.exists(version_path) else "0.0.0"
 
 SRC_DIR = os.path.dirname(__file__)
 ROOT_DIR = os.path.dirname(SRC_DIR)
@@ -72,6 +74,10 @@ def compile_raw(args):
         print('#else')
         print('#define __test__ false')
         print('#endif')
+        if args.emscripten:
+            print('#define __emscripten__ true')
+        else:
+            print('#define __emscripten__ false')
         if args.pybind11:
             print('#define __pybind11__ true')
         else:
@@ -79,7 +85,7 @@ def compile_raw(args):
         print()
         tree = parser.parse(args.source)
         tree = expand(tree)
-        tree.start(args.source_name, args.profiler, args.sa_profiler, args.pybind11)
+        tree.start(args.source_name, args.profiler, args.sa_profiler, args.emscripten, args.pybind11)
     except lark.UnexpectedToken as e:
         print(f"\nsyntax error ... line: {e.line}, column: {e.column}")
         print(args.source.split("\n")[e.line-1])
@@ -222,6 +228,32 @@ def build(args):
     return args.build_success
 
 
+def emscripten_build(args):
+    options = []
+    options.append('-DMM$LOCAL')
+    if args.debug:
+        options.append('-DMM$DBG')
+    if args.vis:
+        options.append('-DMM$VIS')
+    if args.test:
+        options.append('-DMM$TEST')
+    js_path = args.target_path.replace('.m2', '.js')
+    html_path = args.target_path.replace('.m2', '.html')
+    subprocess.run(['em++', '-std=c++14', '-O2', '-o', js_path] + options + [args.output_path, '-sEXPORTED_RUNTIME_METHODS=ccall,cwrap', '-sASYNCIFY=1', '-sSINGLE_FILE=1', '-sFORCE_FILESYSTEM=1', '-sALLOW_MEMORY_GROWTH=1'])
+    js = open(js_path).read()
+    input_txt, output_txt = "", ""
+    if os.path.exists("input.txt"):
+        input_txt = open("input.txt").read()
+    if os.path.exists("output.txt"):
+        output_txt = open("output.txt").read()
+    html = open(SRC_DIR + '/emscripten.html').read()
+    html = html.replace('{{emscripten_js}}', js).replace('{{input_txt}}', input_txt).replace('{{output_txt}}', output_txt)
+    fs = open(html_path, 'w')
+    fs.write(html)
+    fs.close()
+
+
+
 def splitCommand(command):
     ret = []
     quot = None
@@ -269,6 +301,15 @@ def splitCommand(command):
     return ret
 
 
+def makeaout(args, seed=""):
+    ret = args.aout if hasattr(args, "aout") and args.aout else "./a.out"
+    if seed!="":
+        ret = f'{ret} --seed {seed}'
+    if args.args:
+        ret = f'{ret} {args.args.replace(",", " ").replace("=", " ")}'
+    return ret
+
+
 def test(args):
     m = re.search(r'# *command *: *(.+)', args.source)
     command = m.group(1) if m else None
@@ -289,10 +330,10 @@ def test(args):
             os.remove('result.gv')
         seed = tests[args.test_seed] if tests else args.test_seed
         if command:
-            commands = [cmd.replace('{$SEED}', str(seed)).replace('{$AOUT}', f'./a.out --seed {seed}') for cmd in splitCommand(command)]
+            commands = [cmd.replace('{$SEED}', str(seed)).replace('{$AOUT}', makeaout(args, seed)) for cmd in splitCommand(command)]
             subprocess.run(commands, cwd=args.cwd)
         else:
-            subprocess.run(['./a.out'], stdin=open(tests[args.test_seed]), cwd=args.cwd)
+            subprocess.run(makeaout(args).split(" "), stdin=open(tests[args.test_seed]), cwd=args.cwd)
         if os.path.exists('result.gv'):
             gvc_path = os.path.join(WORK_DIR, 'gvc', 'gvc.jar')
             download('https://github.com/colun/gvc/raw/master/gvc.jar', gvc_path)
@@ -313,22 +354,24 @@ def test(args):
             import sqlite3
             import datetime
             created_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            run_name = f"{args.test_name}({args.args})" if args.args else args.test_name
             db = sqlite3.connect('mm.sqlite3')
             cur = db.cursor()
             cur.execute('create table if not exists runs(run_id integer not null primary key autoincrement, name text null, source text null, created_at text)')
             cur.execute('create table if not exists scores(run_id integer, test_id integer, score real)')
             cur.execute('create table if not exists results(run_id integer, test_id integer, in_path text, sec real, stdout text, stderr text, gv text null)')
-            cur.execute('insert into runs(name, source, created_at) values (?, ?, ?)', (args.test_name, args.source, created_at))
+            cur.execute('insert into runs(name, source, created_at) values (?, ?, ?)', (run_name, args.source, created_at))
             run_id = cur.lastrowid
-            print(f'run_id: {run_id}, created_at: {created_at}')
+            print(f'run_id: {run_id}, created_at: {created_at}, name: {run_name}')
         def exec_test(test_id, in_path):
             score = 0
             start_time = time.time()
             if command:
-                commands = [cmd.replace('{$SEED}', in_path).replace('{$AOUT}', f'./a.out --seed {in_path}') for cmd in splitCommand(command)]
+                commands = [cmd.replace('{$SEED}', in_path).replace('{$AOUT}', makeaout(args, in_path)) for cmd in splitCommand(command)]
+                print(commands)
                 completed = subprocess.run(commands, cwd=args.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8')
             else:
-                completed = subprocess.run(['./a.out'], stdin=open(in_path), cwd=args.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8')
+                completed = subprocess.run(makeaout(args).split(" "), stdin=open(in_path), cwd=args.cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8')
             sec = time.time() - start_time
             for line in completed.stderr.split("\n") + completed.stdout.split("\n"):
                 m = re.match(r'^[Ss]core *[:=] *([\d\.]+)', line)
@@ -338,6 +381,7 @@ def test(args):
         test_ids = sorted(tests.keys())
         if args.test_size is not None:
             test_ids = test_ids[:args.test_size]
+        whole_start_time = time.time()
         tasks = [executor.submit(exec_test, test_id, tests[test_id]) for test_id in test_ids]
         scores = []
         for task in tasks:
@@ -347,7 +391,9 @@ def test(args):
             if not args.test_random:
                 cur.execute('insert into scores(run_id, test_id, score) values (?, ?, ?)', (run_id, test_id, score))
                 cur.execute('insert into results(run_id, test_id, in_path, sec, stdout, stderr, gv) values (?, ?, ?, ?, ?, ?, ?)', (run_id, test_id, in_path, sec, result_stdout, result_stderr, None))
+        whole_sec = time.time() - whole_start_time
         print('score: %f %s' % (sum(scores) / len(scores), scores))
+        print('time: %.3fsec' % (whole_sec, ))
         if not args.test_random:
             db.commit()
             db.close()
@@ -358,7 +404,7 @@ def run(args):
         os.remove('result.gv')
     import datetime
     start_time = datetime.datetime.now()
-    subprocess.run([args.aout])
+    subprocess.run(makeaout(args).split(' '))
     end_time = datetime.datetime.now()
     spend_time = str(end_time - start_time)
     if spend_time.startswith('0:'):
@@ -409,6 +455,8 @@ def compile_file(origin_outs, target_path, output_path, args):
                 test(args)
             elif args.run:
                 run(args)
+    if args.emscripten:
+        emscripten_build(args)
     if args.stdout_flag:
         print(open(args.output_path, 'r').read())
 
@@ -507,6 +555,13 @@ def gen_atcoder(target_path):
             print(f'skip ... {problem.problem_id} ( {problem.get_url()} )')
 
 
+def beep_loop(sleep_time):
+    print("MM END ... wait with beep loop")
+    while True:
+        print("\a", end="", flush=True)
+        time.sleep(sleep_time)
+
+
 def main():
     global executor
 
@@ -516,6 +571,7 @@ def main():
     arggroup = parser.add_argument_group('build / run / test')
     arggroup.add_argument('--output', metavar='OUTPUT', default='a.out.cpp', help='output file/folder')
     arggroup.add_argument('--build', action='store_true', help='compile')
+    arggroup.add_argument('--emscripten', action='store_true', help='for emscripten')
     arggroup.add_argument('--pybind11', action='store_true', help='use pybind11')
     arggroup.add_argument('--run', action='store_true', help='compile + execute')
     arggroup.add_argument('--test', action='store_true', help='compile + test using `in` folder')
@@ -523,7 +579,8 @@ def main():
     arggroup.add_argument('--test-size', metavar='N', type=int, default=None, help='use N testcases in `in` folder')
     arggroup.add_argument('--test-seed', metavar='N', type=int, default=None, help='use only N-nd testcase in `in` folder')
     arggroup.add_argument('--test1', dest='test_seed', action='store_const', const=1, help='use only first testcase in `in` folder')
-    arggroup.add_argument('--test-name', metavar='NAME', help='name the test NAME')
+    arggroup.add_argument('--test-name', metavar='NAME', default="", help='name the test NAME')
+    arggroup.add_argument('--args', metavar='ARGS', default="", help='arguments with run (or test)')
     arggroup.add_argument('--workers', metavar='N', type=int, default=None, help='count of worker processes')
     arggroup = parser.add_argument_group('build options')
     arggroup.add_argument('--profiler', action='store_true', help='profiler on')
@@ -540,10 +597,12 @@ def main():
     arggroup.add_argument('--ac-submit', action='store_true', help='submit using atcoder-tools')
     arggroup.add_argument('--ac-submit-folder', action='store_true', help='folder submit using atcoder-tools')
     arggroup.add_argument('--ac-submit2', action='store_true', help='unlock safety submit using atcoder-tools')
+    arggroup = parser.add_argument_group('sub utilities')
     arggroup.add_argument('--httpd', action='store_true', help='httpd')
+    arggroup.add_argument('--beep', metavar='T', type=float, default=None, help='beep loop with finish')
     args = parser.parse_args()
 
-    if args.httpd:
+    if args.httpd and not args.test:
         return mmhttpd.main()
 
     max_workers = args.workers
@@ -598,6 +657,13 @@ def main():
             assert False
     for target_path, task_url, success, submission_url in ac_results:
         print('%s ( %s ) ... %s%s' % (target_path, task_url,  getSuccessString(success), '' if submission_url is None else f' {submission_url}'))
+    if args.httpd:
+        def callback():
+            if args.beep is not None:
+                threading.Thread(target=beep_loop, args=(args.beep, ), daemon=True).start()
+        return mmhttpd.main(callback)
+    elif args.beep is not None:
+        beep_loop(args.beep)
 
 
 if __name__ == '__main__':
