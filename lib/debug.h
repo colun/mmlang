@@ -51,6 +51,103 @@ void debug_unit(const char * val) {
 void debug_unit(const std::string & val) {
     fprintf(stderr, "%s", val.c_str());
 }
+template<class T>void debug_unit(const std::vector<T> & val);
+template<class T1>void debug_unit(const std::tuple<T1> & val) {
+    fprintf(stderr, "tuple(1) { ");
+    debug_unit(get<0>(val));
+    fprintf(stderr, " }");
+}
+template<class T1, class T2>void debug_unit(const std::tuple<T1, T2> & val) {
+    fprintf(stderr, "tuple(2) { ");
+    debug_unit(get<0>(val));
+    fputc(' ', stderr);
+    debug_unit(get<1>(val));
+    fprintf(stderr, " }");
+}
+template<class T1, class T2, class T3>void debug_unit(const std::tuple<T1, T2, T3> & val) {
+    fprintf(stderr, "tuple(3) { ");
+    debug_unit(get<0>(val));
+    fputc(' ', stderr);
+    debug_unit(get<1>(val));
+    fputc(' ', stderr);
+    debug_unit(get<2>(val));
+    fprintf(stderr, " }");
+}
+template<class T1, class T2, class T3, class T4>void debug_unit(const std::tuple<T1, T2, T3, T4> & val) {
+    fprintf(stderr, "tuple(4) { ");
+    debug_unit(get<0>(val));
+    fputc(' ', stderr);
+    debug_unit(get<1>(val));
+    fputc(' ', stderr);
+    debug_unit(get<2>(val));
+    fputc(' ', stderr);
+    debug_unit(get<3>(val));
+    fprintf(stderr, " }");
+}
+template<class T1, class T2, class T3, class T4, class T5>void debug_unit(const std::tuple<T1, T2, T3, T4, T5> & val) {
+    fprintf(stderr, "tuple(5) { ");
+    debug_unit(get<0>(val));
+    fputc(' ', stderr);
+    debug_unit(get<1>(val));
+    fputc(' ', stderr);
+    debug_unit(get<2>(val));
+    fputc(' ', stderr);
+    debug_unit(get<3>(val));
+    fputc(' ', stderr);
+    debug_unit(get<4>(val));
+    fprintf(stderr, " }");
+}
+template<class T1, class T2, class T3, class T4, class T5, class T6>void debug_unit(const std::tuple<T1, T2, T3, T4, T5, T6> & val) {
+    fprintf(stderr, "tuple(6) { ");
+    debug_unit(get<0>(val));
+    fputc(' ', stderr);
+    debug_unit(get<1>(val));
+    fputc(' ', stderr);
+    debug_unit(get<2>(val));
+    fputc(' ', stderr);
+    debug_unit(get<3>(val));
+    fputc(' ', stderr);
+    debug_unit(get<4>(val));
+    fputc(' ', stderr);
+    debug_unit(get<5>(val));
+    fprintf(stderr, " }");
+}
+template<class T1, class T2, class T3, class T4, class T5, class T6, class T7>void debug_unit(const std::tuple<T1, T2, T3, T4, T5, T6, T7> & val) {
+    fprintf(stderr, "tuple(7) { ");
+    debug_unit(get<0>(val));
+    fputc(' ', stderr);
+    debug_unit(get<1>(val));
+    fputc(' ', stderr);
+    debug_unit(get<2>(val));
+    fputc(' ', stderr);
+    debug_unit(get<3>(val));
+    fputc(' ', stderr);
+    debug_unit(get<4>(val));
+    fputc(' ', stderr);
+    debug_unit(get<5>(val));
+    fputc(' ', stderr);
+    debug_unit(get<6>(val));
+    fprintf(stderr, " }");
+}
+template<class T1, class T2, class T3, class T4, class T5, class T6, class T7, class T8>void debug_unit(const std::tuple<T1, T2, T3, T4, T5, T6, T7, T8> & val) {
+    fprintf(stderr, "tuple(8) { ");
+    debug_unit(get<0>(val));
+    fputc(' ', stderr);
+    debug_unit(get<1>(val));
+    fputc(' ', stderr);
+    debug_unit(get<2>(val));
+    fputc(' ', stderr);
+    debug_unit(get<3>(val));
+    fputc(' ', stderr);
+    debug_unit(get<4>(val));
+    fputc(' ', stderr);
+    debug_unit(get<5>(val));
+    fputc(' ', stderr);
+    debug_unit(get<6>(val));
+    fputc(' ', stderr);
+    debug_unit(get<7>(val));
+    fprintf(stderr, " }");
+}
 template<class T>void debug_unit(const std::vector<T> & val) {
     fprintf(stderr, "vec(%d) {", (int)val.size());
     for(int i=0; i<(int)val.size(); ++i) {

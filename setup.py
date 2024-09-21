@@ -11,7 +11,7 @@ setuptools.setup(
         'mmlang': 'src',
     },
     package_data={
-        'mmlang': ['mmlang.lark', '../version.txt', '../lib/*'],
+        'mmlang': ['mmlang.lark', 'emscripten.html', '../version.txt', '../lib/*'],
     },
     include_package_data=True,
     install_requires=[

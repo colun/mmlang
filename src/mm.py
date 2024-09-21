@@ -569,7 +569,7 @@ def main():
     parser = argparse.ArgumentParser(description='MM Language ' + __version__)
     parser.add_argument('target', metavar='SOURCE', help='source code file/folder')
     arggroup = parser.add_argument_group('build / run / test')
-    arggroup.add_argument('--output', metavar='OUTPUT', default='a.out.cpp', help='output file/folder')
+    arggroup.add_argument('--output', metavar='OUTPUT', default=None, help='output `file` or `folder`')
     arggroup.add_argument('--build', action='store_true', help='compile')
     arggroup.add_argument('--emscripten', action='store_true', help='for emscripten')
     arggroup.add_argument('--pybind11', action='store_true', help='use pybind11')
@@ -624,15 +624,19 @@ def main():
         assert not os.path.exists(args.target), '対象が既に存在しているため、--ac-genは使えません'
         gen_atcoder(args.target)
     elif os.path.isdir(args.target):
-        assert args.ac_test or args.ac_submit or args.output is not None, '対象がフォルダの場合には、--output, --ac-testのいずれかの指定が必須となります'
+        assert args.ac_test or args.ac_submit, '対象がフォルダの場合には、--output, --ac-testのいずれかの指定が必須となります'
         assert not args.build, '対象がフォルダの場合には、--build指定はできません'
         assert not args.run, '対象がフォルダの場合には、--run指定はできません'
         assert not args.test, '対象がフォルダの場合には、--test指定はできません'
         assert args.output is None or not os.path.exists(args.output) or os.path.isdir(args.output), '--outputの指定先は、存在しないかフォルダである必要があります'
         assert not args.ac_submit or args.ac_submit_folder, '対象がフォルダの場合の--ac-submitは、代わりに--ac-submit-folderを使用してください'
+        if args.output is None:
+            args.output = "a.out.cpps"
         args.folder_mode = True
         compile_folder(origin_outs, args.target, args.output, args)
     else:
+        if args.output is None:
+            args.output = "a.out.cpp"
         args.folder_mode = False
         output_path = args.output
         if output_path is not None and os.path.isdir(args.output):

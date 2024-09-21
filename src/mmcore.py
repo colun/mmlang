@@ -175,16 +175,29 @@ class base_node:
         return False
 
 
-class node_if_suffix(base_node):
+class node_for_if_suffix(base_node):
 
-    def __init__(self, meta, node_type, body, test):
+    def __init__(self, meta, node_type, body, *args):
         self.meta = meta
         self.node_type = node_type
         self.body = body
-        self.test = test
+        self.fyi = None
+        self.test = None
+        before = None
+        for arg in args:
+            if before == "for":
+                self.fyi = arg
+            if before == "if":
+                self.test = arg
+            before = arg
 
     def getChildNodes(self):
-        return [self.body, self.test]
+        ret = [self.body]
+        if self.fyi is not None:
+            ret.append(self.fyi)
+        if self.test is not None:
+            ret.append(self.test)
+        return ret
 
     def getType(self):
         return self.body.getType()
@@ -238,7 +251,7 @@ def hintType(name, ty0, ty1, op):
         return Template(ty0.name, [hintType('%s[]' % name, ty0.args[0], ty1.args[0], op)])
     if op in ['+=', '-='] and ty0 in ['set', 'multiset']:
         return Template(ty0, [ty1])
-    elif op in ['=', '+=', '-=', '|=', '&=', '^=', '/=', '<?=', '>?='] or op in ['*='] and ty1 in ['double']:
+    elif op in ['=', '@=', '+=', '-=', '|=', '&=', '^=', '/=', '<?=', '>?='] or op in ['*='] and ty1 in ['double']:
         return comprehensionType(ty0, ty1)
     elif op in ['*='] and ty1 in ['int']:
         return ty0
@@ -253,6 +266,7 @@ def getMinMaxValueExpr(ty, upper_flag):
         'short': '-32768',
         'int': '-2147483648',
         'long long': '-9223372036854775808LL',
+        'size_t': '0LL',
         'double': '-DBL_MAX',
     }
     UPPER = {
@@ -260,6 +274,7 @@ def getMinMaxValueExpr(ty, upper_flag):
         'short': '32767',
         'int': '2147483647',
         'long long': '9223372036854775807LL',
+        'size_t': '18446744073709551615ULL',
         'double': 'DBL_MAX',
     }
     if str(ty) in ['double']:
@@ -506,20 +521,30 @@ class Context:
         self.func_args[name] = params
 
     def declareClass(self, name, parent_class):
-        cls_obj = {}
+        methods = {}
+        members = {}
         if parent_class is not None:
-            cls_obj = {**lib.class_definition.get(parent_class)}
-        lib.class_definition[name] = (cls_obj, None)
-        return cls_obj
+            parent_class_obj = lib.class_definition.get(parent_class)
+            methods = {**parent_class_obj[0]}
+            if 3<=len(parent_class_obj):
+                members = {**parent_class_obj[2]}
+        class_obj = (methods, None, members)
+        lib.class_definition[name] = class_obj
+        return class_obj
 
-    def declareClassFunc(self, cls_obj, name, ty, params):
-        cls_obj[name] = ty
+    def declareClassFunc(self, class_obj, name, ty, params):
+        class_obj[0][name] = ty
+
+    def declareClassMember(self, class_obj, name, ty):
+        class_obj[2][name] = ty
 
     def getReturnType(self, name):
         if name in self.func_types:
             return self.func_types[name]
         if self.parent is not None:
             return self.parent.getReturnType(name)
+        if self.isDefined(name):
+            return self.getMethodReturnType(self.getType(name), '__call__')
         if name in lib.func_definition:
             return typeFromLib(lib.func_definition[name][0])
         assert False, "function '%s' is not defined" % name
@@ -531,6 +556,24 @@ class Context:
             return self.parent.getFuncArgs(name)
         return None
 
+    def getMemberType(self, ty, name):
+        if isinstance(ty, Template):
+            ty_name = ty.name
+        else:
+            assert isinstance(ty, str)
+            ty_name = ty
+        if ty_name not in lib.class_definition:
+            print(context.definitions)
+        member_dic = lib.class_definition[ty_name][2]
+        ret_type = member_dic[name]
+        if isinstance(ret_type, str):
+            m = re.match(r'\$(\d+)$', ret_type)
+            if m:
+                n = int(m.group(1)) - 1
+                assert isinstance(ty, Template)
+                ret_type = ty.args[n]
+        return ret_type
+
     def getMethodReturnType(self, ty, name):
         if isinstance(ty, Template):
             ty_name = ty.name
@@ -541,11 +584,12 @@ class Context:
             print(context.definitions)
         method_dic = lib.class_definition[ty_name][0]
         ret_type = method_dic[name]
-        m = re.match(r'\$(\d+)$', ret_type)
-        if m:
-            n = int(m.group(1)) - 1
-            assert isinstance(ty, Template)
-            ret_type = ty.args[n]
+        if isinstance(ret_type, str):
+            m = re.match(r'\$(\d+)$', ret_type)
+            if m:
+                n = int(m.group(1)) - 1
+                assert isinstance(ty, Template)
+                ret_type = ty.args[n]
         return ret_type
 
     def hasMethod(self, ty, name):
@@ -617,6 +661,10 @@ class Context:
                 return
             ty1 = ty.getType() if isinstance(ty, base_node) else ty
             dObj[0] = hintType(name, dObj[0], ty1, op)
+            if op == '@=':
+                dObj[1] = 1
+                dObj[2] = 0
+                dObj[3] = False
 
     def countMutate(self, name):
         if self.isDefined(name):
@@ -818,7 +866,7 @@ class node_multi_stmt(base_node):
         self.stmts = stmts
 
 
-def visitTopologicalUseBind(node):
+def visitTopologicalUseBind(node, node2=None):
     def reduce(main, subs):
         rets = []
         for sub in subs:
@@ -847,6 +895,8 @@ def visitTopologicalUseBind(node):
         if obj[0] is not None:
             obj[0][1]()
     ret = node.visit('visitUseBind', childrenMethods=['getChildNodesForBind', 'getChildNodesWithoutSuite'], reduce=reduce)
+    if node2 is not None:
+        ret = reduce(None, [ret, node2.visit('visitUseBind', childrenMethods=['getChildNodesForBind', 'getChildNodesWithoutSuite'], reduce=reduce)])
     ret = visit(ret)
     if ret:
         visit2(ret)
@@ -886,6 +936,10 @@ class group_node(base_node):
             if param_flag == 1:
                 context.print('%s %s;' % (typeToStr(ty), name))
         context = preContext
+
+    def registerMembers(self, class_obj):
+        for name, ty, count, param_flag, node in self.context.getDefinitions():
+            context.declareClassMember(class_obj, name, ty)
 
     def start(self, source_name, profiler_flag, sa_profiler_flag, emscripten_flag, pybind11_flag):
         global context
@@ -999,7 +1053,8 @@ class group_node(base_node):
                 child.container.visit('visitBindSymbol')
                 parentContext = context
                 context = Context(parentContext, scopeLevel=1)
-                child.temporary.definesFor()
+                if child.temporary is not None:
+                    child.temporary.definesFor()
                 child.suite.defines()
                 if child.else_suite is not None:
                     context = Context(parentContext, scopeLevel=1)
@@ -1053,7 +1108,7 @@ class group_node(base_node):
                 for i in range(args_len - 1, -1, -1):
                     if flag:
                         child.args[i * 2].hintType(child.args[args_len * 2], child.args[i * 2 + 1])
-                        if child.args[i * 2 + 1] != '=':
+                        if child.args[i * 2 + 1] not in ['=', '@=']:
                             flag = False
                     child.args[i * 2].countMutate()
             #elif (isinstance(child, pre_op1_node) or isinstance(child, post_op1_node)) and child.node_type in ['pre_inc', 'pre_dec', 'post_inc', 'post_dec']:
@@ -1088,8 +1143,10 @@ class group_node(base_node):
                 expr = info
                 if expr.isAggregateFunc():
                     arg = expr.args[0]
+                    fyi = None
                     test = None
-                    if isinstance(arg, node_if_suffix):
+                    if isinstance(arg, node_for_if_suffix):
+                        fyi = arg.fyi
                         test = arg.test
                         arg = arg.body
                     ty = arg.getType()
@@ -1119,14 +1176,20 @@ class group_node(base_node):
                         context.print('double %s = %s;' % (name, init_value))
                     elif func_name == 'sum' and ty=='bool':
                         context.print('int %s = %s;' % (name, init_value))
+                    elif func_name == 'map':
+                        context.print('std::vector<%s> %s;' % (ty, name))
                     else:
                         context.print('%s %s = %s;' % (ty, name, init_value))
                     if func_name == 'mean' or func_name == 'geomean':
                         context.print('int %s$cnt = 0;' % (name, ))
-                    visitTopologicalUseBind(arg)
+                    nest_count2 = 0
+                    visitTopologicalUseBind(arg, fyi)
                     context.pushInstantSymbols()
-                    nest_count2 = self.processInstant()
+                    nest_count2 += self.processInstant()
                     if test is not None:
+                        visitTopologicalUseBind(test)
+                        context.pushInstantSymbols()
+                        nest_count2 += self.processInstant()
                         context.print0('if(%s) ' % (test, ))
                     if func_name == 'min':
                         context.print('if(%s<%s) %s = %s;' % (arg, name, name, arg))
@@ -1160,7 +1223,9 @@ class group_node(base_node):
                         else:
                             context.print('{ %s += log2(%s); ++%s$cnt; }' % (name, arg, name))
                     elif func_name in ['median', 'count_uniques']:
-                        context.print('%s$c.push_back(%s);' % (name, arg))
+                        context.print('%s$c.emplace_back(%s);' % (name, arg))
+                    elif func_name == 'map':
+                        context.print('%s.emplace_back(%s);' % (name, arg))
                     self.closeNest(nest_count2)
                     context.popInstantSymbols()
                     if func_name == 'mean':
@@ -1203,6 +1268,9 @@ class group_node(base_node):
                         context.print('}')
                         context.dedent()
                         context.print('}')
+                    if func_name == 'map' and '$' in name:
+                        assert expr.bindStr == name
+                        expr.bindStr = f'std::move({name})'
                 elif isinstance(expr, call_node) and expr.node_type == 'funccall' and str(expr.func) == 'move':
                     context.print('auto %s = %s;' %
                                   (name, expr.toStr()))
@@ -1348,6 +1416,11 @@ class group_node(base_node):
             # :がある場合は、その数だけforを作る
             # @または複数比較がある場合は、{を出力してindent
             # @または複数比較がある場合は、一時変数計算を行う
+            if isinstance(child, node_for_stmt) and child.hasParallel():
+                context.appendInclude('thread_pool.h')
+                context.print('{')
+                context.indent()
+                context.print('MM$ThreadPool $tp%s;' % (child.getParallelConstructorCall(), ))
             context.pushInstantSymbols()
             nest_count = self.processInstant(child=child)
             done = False
@@ -1381,12 +1454,9 @@ class group_node(base_node):
                 expr = child.container
                 ty = expr.getType()
                 temporary = child.temporary
-                if child.hasParallel():
-                    context.appendInclude('thread_pool.h')
+                if temporary is None:
                     context.print('{')
-                    context.indent()
-                    context.print('MM$ThreadPool $tp%s;' % (child.getParallelConstructorCall(), ))
-                if ty in ['unsigned long long', 'uint64', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
+                elif ty in ['unsigned long long', 'uint64', 'long long', 'int64', 'size_t', 'int', 'short', 'char', 'bool']:
                     temporary, minus_flag = expand_minus(temporary)
                     assert isinstance(temporary, node_var), 'コンテナではなく整数値で暗黙のforを回すのに、ループ変数が単独変数ではありません'
                     if not minus_flag:
@@ -1912,9 +1982,6 @@ class node_classdef(base_node):
     def getChildNodes(self):
         return self.getChildNodesWithoutSuite() + self.getSuiteChildNodes()
 
-    def visitDeclare(self):
-        self.class_obj = context.declareClass(self.name, self.parent_class)
-
     def getDecorators(self):
         ret = {}
         for decorator in self.decorators:
@@ -1934,15 +2001,18 @@ class node_classdef(base_node):
         context.print('struct %s;' % (self.name, ))
 
     def visitDeclare(self):
+        self.class_obj = context.declareClass(self.name, self.parent_class)
         context.print('struct %s%s {' % (self.name, '' if self.parent_class is None else ' : ' + self.parent_class))
         context.indent()
         self.suite.visit('visitDeclare')
         self.suite.visit('visitCallFunc')
         self.suite.redefines()
         self.suite.printDefines()
+        self.suite.registerMembers(self.class_obj)
         context.print('%s();' % (self.name, ))
         context.dedent()
         context.print('};')
+        context.print('')
 
     def visitDefineFunc(self):
         context.print('%s::%s() {' % (self.name, self.name))
@@ -1952,6 +2022,7 @@ class node_classdef(base_node):
         self.suite.suite()
         context.dedent()
         context.print('}')
+        context.print('')
 
 class node_varhint(base_node):
 
@@ -2481,6 +2552,8 @@ class call_node(base_node):
                     return self.func.obj.getType()
                 if self.func.member == 'bound':
                     return Template('vector', ['int'])
+            if isinstance(self.func, node_var) and self.func.name in ['map'] and len(self.args) == 1:
+                return Template('vector', [self.args[0].getType()])
             return self.func.getReturnType()
         elif self.node_type == 'getitem':
             assert len(self.args) == 1
@@ -2511,7 +2584,7 @@ class call_node(base_node):
         return Template(self.func.name, args)
 
     def defines(self):
-        assert self.node_type == 'getitem'
+        assert self.node_type in ['getitem', 'funccall']
         for arg in self.args:
             arg.visit('visitBindSymbol')
         self.func.defines()
@@ -2529,17 +2602,18 @@ class call_node(base_node):
         return ty
 
     def hintType(self, ty, op):
-        self.func.hintType(self.assembleType(ty), op)
+        if self.node_type == 'getitem':
+            self.func.hintType(self.assembleType(ty), op)
 
     def countMutate(self):
-        assert self.node_type == 'getitem'
-        self.func.countMutate()
+        if self.node_type == 'getitem':
+            self.func.countMutate()
 
     def getChildNodes(self):
         return [self.func] + list(self.args)
 
     def getChildNodesForBind(self):
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'prod', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'geomean', 'median'] and len(self.args) == 1:
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'prod', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'geomean', 'median', 'map'] and len(self.args) == 1:
             return [self.func]
         else:
             return [self.func] + list(self.args)
@@ -2552,7 +2626,7 @@ class call_node(base_node):
                 self.func.obj.reserveBind()
             elif self.func.member in ['eq_to_end', 'eq_to_rend']:
                 self.func.obj.reserveBind()
-        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'prod', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'geomean', 'median'] and len(self.args) == 1:
+        if self.node_type == 'funccall' and isinstance(self.func, node_var) and self.func.name in ['min', 'max', 'sum', 'prod', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'geomean', 'median', 'map'] and len(self.args) == 1:
             self.reserveBind()
             if self.func.name in ['min', 'max']:
                 self.args[0].reserveBind()
@@ -2566,7 +2640,7 @@ class call_node(base_node):
             return self.func.printResize(size, name)
 
     def isAggregateFunc(self):
-        return self.node_type == 'funccall' and str(self.func) in ['min', 'max', 'sum', 'prod', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'geomean', 'median'] and len(self.args) == 1
+        return self.node_type == 'funccall' and str(self.func) in ['min', 'max', 'sum', 'prod', 'xor', 'count_trues', 'count_uniques', 'count_changes', 'any', 'all', 'mean', 'geomean', 'median', 'map'] and len(self.args) == 1
 
 
 call_dic = {
@@ -2606,6 +2680,22 @@ class node_getattr(base_node):
         if isinstance(ty, Template) or isinstance(ty, str):
             return context.getMethodReturnType(ty, self.member)
         return 'int'
+
+    def getType(self):
+        ty = self.obj.getType()
+        if isinstance(ty, Template) or isinstance(ty, str):
+            return context.getMemberType(ty, self.member)
+        assert False
+
+    def defines(self):
+        self.obj.defines()
+
+
+    def countMutate(self):
+        pass
+
+    def hintType(self, ty, op):
+        pass
 
 
 class tuple_node(base_node):
@@ -2822,6 +2912,9 @@ class op2_node(base_node):
                 definition = context.getDefinition(self.args[0].getVarName())
                 if definition is not None and definition[2] == 2:
                     return ''
+        if self.node_type == 'assign' and self.args[1]=='@=':
+            value = ' '.join(str(arg) for arg in self.args[2:])
+            return f'auto & {self.args[0]} = {value};'
         return ' '.join(str(arg) for arg in self.args)
 
     def getType(self):
@@ -3101,10 +3194,30 @@ class node_for_stmt(base_node):
         while isinstance(args[0], node_decorator):
             assert args[0].name in 'parallel', 'for文は@parallel以外のデコレータに対応していません'
             self.decorators.append(args.pop(0))
-        self.temporary = args.pop(0)
-        self.container = args.pop(0)
-        self.suite = args.pop(0)
-        self.else_suite = args.pop(0) if args else None
+        assert 2<=len(args)
+        if isinstance(args[-2], group_node) and args[-2].node_type=='suite':
+            self.else_suite = args.pop()
+        else:
+            self.else_suite = None
+        assert isinstance(args[-1], group_node) and args[-1].node_type=='suite'
+        self.suite = args.pop()
+        self.container = args.pop()
+        assert len(args)==0
+        self.temporary = None
+        if isinstance(self.container, tuple_node):
+            elements = self.container.elements
+        else:
+            elements = [self.container]
+        element = elements[-1]
+        if isinstance(element, loop_node):
+            element = element.slice[0]
+        if isinstance(element, op2_node) and element.node_type == 'comparison' and len(element.args)==3 and element.args[1]=='in':
+            if isinstance(self.container, tuple_node):
+                self.container.elements = elements[:-1] + (element.args[0], )
+                self.temporary = self.container
+            else:
+                self.temporary = element.args[0]
+            self.container = element.args[2]
 
     def hasParallel(self):
         for decorator in self.decorators:
@@ -3135,7 +3248,10 @@ class node_for_stmt(base_node):
         return self.getChildNodesWithoutSuite() + self.getSuiteChildNodes()
 
     def getChildNodesWithoutSuite(self):
-        return self.decorators + [self.temporary, self.container]
+        if self.temporary is None:
+            return self.decorators + [self.container]
+        else:
+            return self.decorators + [self.temporary, self.container]
 
     def getSuiteChildNodes(self):
         ret = [self.suite]
@@ -3196,11 +3312,14 @@ def symbol_node(meta, node_type, *op):
 
 
 node_assign_op = symbol_node
+node_bind_assign_op = symbol_node
 node_comp_op = symbol_node
 node_arith_op = symbol_node
 node_mul_op = symbol_node
 node_shift_op = symbol_node
 node_instant_op = symbol_node
+node_for_op = symbol_node
+node_if_op = symbol_node
 
 
 class node_pass_stmt(base_node):
