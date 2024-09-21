@@ -624,7 +624,7 @@ def main():
         assert not os.path.exists(args.target), '対象が既に存在しているため、--ac-genは使えません'
         gen_atcoder(args.target)
     elif os.path.isdir(args.target):
-        assert args.ac_test or args.ac_submit, '対象がフォルダの場合には、--output, --ac-testのいずれかの指定が必須となります'
+        assert args.ac_test or args.ac_submit or args.output is not None, '対象がフォルダの場合には、--output, --ac-testのいずれかの指定が必須となります'
         assert not args.build, '対象がフォルダの場合には、--build指定はできません'
         assert not args.run, '対象がフォルダの場合には、--run指定はできません'
         assert not args.test, '対象がフォルダの場合には、--test指定はできません'
