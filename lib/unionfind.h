@@ -1,39 +1,38 @@
 struct unionfind {
 private:
-    int N;
-    vector<int> parent;
-    vector<int> count;
+    std::vector<std::tuple<int, int> > data;
 public:
-    unionfind() : N(0), parent(), count() {}
-    unionfind(int N) : N(N), parent(N), count(N, 1) {
-        for(int i=0, e=N; i<e; ++i) {
-            parent[i] = i;
+    unionfind() : data() {}
+    void clear() {
+        for(int i=0, e=data.size(); i<e; ++i) {
+            data[i] = std::tuple<int, int>(i, 1);
         }
     }
-    unionfind(unionfind & o) : N(o.N), parent(o.parent), count(o.count) {}
-    void clear() {
-        for(int i=0, e=N; i<e; ++i) {
-            parent[i] = i;
-            count[i] = 1;
-        }
+    unionfind(int N) : data(N) {
+        clear();
+    }
+    unionfind(unionfind & o) : data(o.data) {}
+    void init(int N) {
+        data.resize(N);
+        clear();
     }
     int root(int i) {
-        if(parent[i]==i) {
+        if(std::get<0>(data[i])==i) {
             return i;
         }
-        return parent[i] = root(parent[i]);
+        return std::get<0>(data[i]) = root(std::get<0>(data[i]));
     }
     void unite(int u, int v) {
         u = root(u);
         v = root(v);
         if(u!=v) {
-            if(count[u]<count[v]) {
-                parent[u] = v;
-                count[v] += count[u];
+            if(std::get<1>(data[u])<std::get<1>(data[v])) {
+                std::get<0>(data[u]) = v;
+                std::get<1>(data[v]) += std::get<1>(data[u]);
             }
             else {
-                parent[v] = u;
-                count[u] += count[v];
+                std::get<0>(data[v]) = u;
+                std::get<1>(data[u]) += std::get<1>(data[v]);
             }
         }
     }

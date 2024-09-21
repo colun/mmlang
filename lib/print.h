@@ -21,9 +21,11 @@ void print_unit(const void * val) {
 void print_unit(long long val) {
     printf("%lld", val);
 }
+#ifndef WIN32
 void print_unit(unsigned long long val) {
     printf("%llu", val);
 }
+#endif
 void print_unit(__int128 val) {
     char buf[128];
     int idx = 128;

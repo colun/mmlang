@@ -24,6 +24,9 @@ class FileReader {
             }
             bufPos = 0;
         }
+        if(bufLen==bufPos) {
+            return "";
+        }
         if(mode==0) {
             int pos = bufPos;
             while(true) {
@@ -109,10 +112,10 @@ class FileReader {
             return ret;
         }
         else if(mode==2) {
-            return bufLen<=bufPos ? NULL : buf+bufPos;
+            return bufLen<=bufPos ? "" : buf+bufPos;
         }
         assert(false);
-        return NULL;
+        return "";
     }
 public:
     FileReader() : file(NULL), bufLen(sizeof(buf)), bufPos(sizeof(buf)), canReadFlag(true), crFlag(false), enterFlag(false) {}

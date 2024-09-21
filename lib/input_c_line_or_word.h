@@ -1,49 +1,71 @@
+char inputCLineOrWord$buf[2097152];
+int inputCLineOrWord$bufLen = sizeof(inputCLineOrWord$buf);
+int inputCLineOrWord$bufPos = sizeof(inputCLineOrWord$buf);
+bool inputCLineOrWord$canReadFlag = true;
+bool inputCLineOrWord$crFlag = false;
+bool inputCLineOrWord$enterFlag = false;
+FILE * inputCLineOrWord$stdin = stdin;
+
+void inputOpen(const string & fn) {
+    if(inputCLineOrWord$stdin!=stdin) {
+        fclose(inputCLineOrWord$stdin);
+        inputCLineOrWord$stdin = stdin;
+    }
+    inputCLineOrWord$stdin = fopen(fn.c_str(), "r");
+    inputCLineOrWord$bufLen = sizeof(inputCLineOrWord$buf);
+    inputCLineOrWord$bufPos = sizeof(inputCLineOrWord$buf);
+    inputCLineOrWord$canReadFlag = true;
+    inputCLineOrWord$crFlag = false;
+    inputCLineOrWord$enterFlag = false;
+}
+
+//void inputRollback() {
+//
+//}
+
 const char * inputCLineOrWord(int mode) {
-    static char buf[2097152];
-    static int bufLen = sizeof(buf);
-    static int bufPos = sizeof(buf);
-    static bool canReadFlag = true;
-    static bool crFlag = false;
-    static bool enterFlag = false;
-    if(canReadFlag && (enterFlag ? bufLen<=bufPos : (int)sizeof(buf)<=bufPos+bufPos)) {
-        if(0<bufLen-bufPos) {
-            memmove(buf, buf+bufPos, bufLen-bufPos);
-            bufLen -= bufPos;
+    if(inputCLineOrWord$canReadFlag && (inputCLineOrWord$enterFlag ? inputCLineOrWord$bufLen<=inputCLineOrWord$bufPos : (int)sizeof(inputCLineOrWord$buf)<=inputCLineOrWord$bufPos+inputCLineOrWord$bufPos)) {
+        if(0<inputCLineOrWord$bufLen-inputCLineOrWord$bufPos) {
+            memmove(inputCLineOrWord$buf, inputCLineOrWord$buf+inputCLineOrWord$bufPos, inputCLineOrWord$bufLen-inputCLineOrWord$bufPos);
+            inputCLineOrWord$bufLen -= inputCLineOrWord$bufPos;
         }
         else {
-            bufLen = 0;
+            inputCLineOrWord$bufLen = 0;
         }
-        char * result = fgets(buf+bufLen, sizeof(buf)-bufLen, stdin);
-        canReadFlag = (result!=NULL);
+        char * result = fgets(inputCLineOrWord$buf+inputCLineOrWord$bufLen, sizeof(inputCLineOrWord$buf)-inputCLineOrWord$bufLen, inputCLineOrWord$stdin);
+        inputCLineOrWord$canReadFlag = (result!=NULL);
         if(result!=NULL) {
             int n = strlen(result);
-            enterFlag = (n!=(int)sizeof(buf)-1-bufLen || (1<=bufLen+n && buf[bufLen+n-1]=='\n'));
-            bufLen += n;
+            inputCLineOrWord$enterFlag = (n!=(int)sizeof(inputCLineOrWord$buf)-1-inputCLineOrWord$bufLen || (1<=inputCLineOrWord$bufLen+n && inputCLineOrWord$buf[inputCLineOrWord$bufLen+n-1]=='\n'));
+            inputCLineOrWord$bufLen += n;
         }
-        bufPos = 0;
+        inputCLineOrWord$bufPos = 0;
+    }
+    if(inputCLineOrWord$bufLen==inputCLineOrWord$bufPos) {
+        return "";
     }
     if(mode==0) {
-        int pos = bufPos;
+        int pos = inputCLineOrWord$bufPos;
         while(true) {
-            char c = buf[pos];
+            char c = inputCLineOrWord$buf[pos];
             if(c==32) {
-                buf[pos++] = '\0';
+                inputCLineOrWord$buf[pos++] = '\0';
                 break;
             }
             else if(c==10) {
-                if(crFlag) {
-                    crFlag = false;
-                    if(bufPos==pos) {
-                        pos = ++bufPos;
+                if(inputCLineOrWord$crFlag) {
+                    inputCLineOrWord$crFlag = false;
+                    if(inputCLineOrWord$bufPos==pos) {
+                        pos = ++inputCLineOrWord$bufPos;
                         continue;
                     }
                 }
-                buf[pos++] = '\0';
+                inputCLineOrWord$buf[pos++] = '\0';
                 break;
             }
             else if(c==13) {
-                crFlag = true;
-                buf[pos++] = '\0';
+                inputCLineOrWord$crFlag = true;
+                inputCLineOrWord$buf[pos++] = '\0';
                 break;
             }
             else if(c==0) {
@@ -51,12 +73,12 @@ const char * inputCLineOrWord(int mode) {
             }
             ++pos;
         }
-        const char * ret = buf + bufPos;
-        bufPos = pos;
+        const char * ret = inputCLineOrWord$buf + inputCLineOrWord$bufPos;
+        inputCLineOrWord$bufPos = pos;
         while(true) {
-            char c = buf[bufPos];
+            char c = inputCLineOrWord$buf[inputCLineOrWord$bufPos];
             if(c==32 || c==10 || c==13) {
-                ++bufPos;
+                ++inputCLineOrWord$bufPos;
             }
             else {
                 break;
@@ -65,23 +87,23 @@ const char * inputCLineOrWord(int mode) {
         return ret;
     }
     else if(mode==1) {
-        int pos = bufPos;
+        int pos = inputCLineOrWord$bufPos;
         while(true) {
-            char c = buf[pos];
+            char c = inputCLineOrWord$buf[pos];
             if(c==10) {
-                if(crFlag) {
-                    crFlag = false;
-                    if(bufPos==pos) {
-                        pos = ++bufPos;
+                if(inputCLineOrWord$crFlag) {
+                    inputCLineOrWord$crFlag = false;
+                    if(inputCLineOrWord$bufPos==pos) {
+                        pos = ++inputCLineOrWord$bufPos;
                         continue;
                     }
                 }
-                buf[pos++] = '\0';
+                inputCLineOrWord$buf[pos++] = '\0';
                 break;
             }
             else if(c==13) {
-                crFlag = true;
-                buf[pos++] = '\0';
+                inputCLineOrWord$crFlag = true;
+                inputCLineOrWord$buf[pos++] = '\0';
                 break;
             }
             else if(c==0) {
@@ -89,14 +111,14 @@ const char * inputCLineOrWord(int mode) {
             }
             ++pos;
         }
-        const char * ret = buf + bufPos;
-        bufPos = pos;
-        if(crFlag) {
+        const char * ret = inputCLineOrWord$buf + inputCLineOrWord$bufPos;
+        inputCLineOrWord$bufPos = pos;
+        if(inputCLineOrWord$crFlag) {
             while(true) {
-                char c = buf[bufPos];
+                char c = inputCLineOrWord$buf[inputCLineOrWord$bufPos];
                 if(c==13) {
-                    ++bufPos;
-                    crFlag = false;
+                    ++inputCLineOrWord$bufPos;
+                    inputCLineOrWord$crFlag = false;
                     break;
                 }
                 else {
@@ -107,8 +129,8 @@ const char * inputCLineOrWord(int mode) {
         return ret;
     }
     else if(mode==2) {
-        return bufLen<=bufPos ? NULL : buf+bufPos;
+        return inputCLineOrWord$bufLen<=inputCLineOrWord$bufPos ? "" : inputCLineOrWord$buf+inputCLineOrWord$bufPos;
     }
     assert(false);
-    return NULL;
+    return "";
 }

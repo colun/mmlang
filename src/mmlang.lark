@@ -11,7 +11,7 @@ assert_stmt: "assert" test ("," test)?
 
 if_stmt: "if" test ":" suite ("elif" test ":" suite)* ("else" ":" suite)?
 while_stmt: "while" test ":" suite ("else" ":" suite)?
-for_stmt: decorator* "for" (noinstant_tuple "in")? noinstant_tuple ":" suite ("else" ":" suite)?
+for_stmt: decorator* "for" tuple suite ("else" ":" suite)?
 suite: multi_stmt | _NEWLINE _INDENT stmt+ _DEDENT
 
 funcdef: decorator* "def" var "(" parameters? ")" ("->" test)? ":" suite
@@ -25,11 +25,10 @@ referencedtype: "&" test
 
 classdef: decorator* "class" var ("(" var ")" )? ":" suite
 
-?assign: tuple (assign_op tuple)* (mod)?
+?assign: tuple (bind_assign_op tuple)? (assign_op tuple)* (mod)?
+!bind_assign_op: "@="
 !assign_op: "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" | "**=" | "//=" | "<?=" | ">?="
 mod: "mod" test
-
-?if_suffix: tuple ("if" test)?
 
 ?tuple: instant ("," instant)* (",")?
 ?noinstant_tuple: bit_or ("," bit_or)* (",")?
@@ -75,7 +74,11 @@ bit_not: "~" prefix
        | post_dec
        | atom
 
-funccall: suffix "(" (if_suffix)? ")"
+?for_if_suffix: tuple (for_op tuple)? (if_op test)?
+!for_op: "for"
+!if_op: "if"
+
+funccall: suffix "(" (for_if_suffix)? ")"
 getitem: suffix "[" assign "]"
 template: suffix "!" "(" (tuple)? ")"
 getattr: suffix "." var
@@ -97,10 +100,12 @@ var: /[a-zA-Z_]\w*/
 ref: /\$\d+/
 
 ?number: dec_number | float | image_float | image_number
-string: (STRING)+
+string: STRING | LONG_STRING
 char: (CHAR)+
 
 STRING: /(".*?(?<!\\)(\\\\)*?")/i
+LONG_STRING: /(""".*?(?<!\\)(\\\\)*?"""|'''.*?(?<!\\)(\\\\)*?''')/is
+
 CHAR: /('.*?(?<!\\)(\\\\)*?')/i
 
 dec_number: /0(x[\da-f]+|o[0-7]+|b[0-1]+|)(ll)?|[1-9]\d*(ll)?/i

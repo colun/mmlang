@@ -1,4 +1,5 @@
 class addresser2d {
+    //axis2dに移行され、そのうち削除予定。
     int width_;
     int height_;
     int y_stride;
@@ -9,7 +10,7 @@ public:
     inline addresser2d() {}
     inline addresser2d(int width, int height=0, bool diagonal=false, int pad=1) : width_(width), height_(height) {
         if(height==0) {
-            height = width;
+            height_ = height = width;
         }
         y_stride = width + pad;
         if(diagonal) {
@@ -41,5 +42,8 @@ public:
     }
     inline int address(int x, int y) const {
         return begin_pos + y_stride * y + x;
+    }
+    inline int operator()(int x, int y) const {
+        return address(x, y);
     }
 };

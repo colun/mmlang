@@ -480,6 +480,51 @@ void gvArrow(double x1, double y1, double x2, double y2, gvRGB rgb) {
 void gvArrow(double x1, double y1, double x2, double y2) {
     gvArrow(x1, y1, x2, y2, 0.5);
 }
+void gvShogi(double x1, double y1, double x2, double y2, double r, gvRGB rgb) {
+    double dx = x2 - x1;
+    double dy = y2 - y1;
+    double dd = dx * dx + dy * dy;
+    if(dd<0.0000000000000001) {
+        gvCircle(x1, y1, r, rgb);
+        return;
+    }
+    double d = sqrt(dd);
+    double rate = r / d;
+    dx *= rate;
+    dy *= rate;
+    double dx52 = dx * 0.52;
+    double dy52 = dy * 0.52;
+    double dx66 = dx * 0.66;
+    double dy66 = dy * 0.66;
+    double dx75 = dx * 0.75;
+    double dy75 = dy * 0.75;
+    double dx84 = dx * 0.84;
+    double dy84 = dy * 0.84;
+    gvInit();
+    gvSendf("p %u %g %g %g %g %g %g %g %g %g %g", rgb.toInt(), x1 + dx, y1 + dy, x1 + dx84 + dy52, y1 + dy84 - dx52, x1 - dx66 + dy75, y1 - dy66 - dx75, x1 - dx66 - dy75, y1 - dy66 + dx75, x1 + dx84 - dy52, y1 + dy84 + dx52);
+    gvFlush_();
+}
+void gvShogi(double x1, double y1, double x2, double y2, double r) {
+    gvShogi(x1, y1, x2, y2, r, gvRGB(0, 0, 0));
+}
+void gvShogi(double x1, double y1, double x2, double y2, gvRGB rgb) {
+    gvShogi(x1, y1, x2, y2, 0.5, rgb);
+}
+void gvShogi(double x1, double y1, double x2, double y2) {
+    gvShogi(x1, y1, x2, y2, 0.5, gvRGB(0, 0, 0));
+}
+void gvShogi(double x, double y, double r, gvRGB rgb) {
+    gvShogi(x, y, x, y-1, r, rgb);
+}
+void gvShogi(double x, double y, double r) {
+    gvShogi(x, y, x, y-1, r, gvRGB(0, 0, 0));
+}
+void gvShogi(double x, double y, gvRGB rgb) {
+    gvShogi(x, y, x, y-1, 0.5, rgb);
+}
+void gvShogi(double x, double y) {
+    gvShogi(x, y, x, y-1, 0.5, gvRGB(0, 0, 0));
+}
 void gvLink(const char * format = "?", ...) {
     va_list arg;
     va_start(arg, format);
